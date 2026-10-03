@@ -1,0 +1,7 @@
+# Only go.mod, go.sum, cmd/ and internal/ are copied; keep everything else,
+# especially .env, out of the build context.
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/
