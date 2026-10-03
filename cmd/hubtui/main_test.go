@@ -358,6 +358,43 @@ func TestTagsPaging(t *testing.T) {
 	}
 }
 
+func TestTagsStable(t *testing.T) {
+	pages := [][]hub.Tag{
+		{tag("3.15.0rc2", "amd64"), tag("latest", "amd64", "arm64"), tag("nightly", "arm64")},
+		{tag("3.14.2", "amd64"), tag("3.15.0b4", "arm64"), tag("3.14.2-alpine", "arm64")},
+	}
+	tests := []struct {
+		name      string
+		args      []string
+		wantNames []string
+		wantPages int
+	}{
+		{"drops prereleases across pages", []string{"--stable", "--limit", "0"}, []string{"latest", "3.14.2", "3.14.2-alpine"}, 2},
+		{"limit counts kept tags with full pages", []string{"--stable", "--limit", "2"}, []string{"latest", "3.14.2"}, 2},
+		{"combines with arch", []string{"--stable", "--arch", "arm64"}, []string{"latest", "3.14.2-alpine"}, 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := &fakeRegistry{tagPages: pages}
+			code, stdout, stderr := runApp(t, reg, append([]string{"tags", "python", "--json"}, tt.args...)...)
+			if code != 0 {
+				t.Fatalf("exit code = %d (stderr: %s)", code, stderr)
+			}
+			if got := tagNames(t, stdout); strings.Join(got, ",") != strings.Join(tt.wantNames, ",") {
+				t.Errorf("tags = %v, want %v", got, tt.wantNames)
+			}
+			if len(reg.calls) != tt.wantPages {
+				t.Errorf("fetched %d pages, want %d", len(reg.calls), tt.wantPages)
+			}
+			for _, c := range reg.calls {
+				if c.PageSize != hub.MaxPageSize {
+					t.Errorf("page size %d, want full pages while filtering", c.PageSize)
+				}
+			}
+		})
+	}
+}
+
 // TestTagsEndToEnd runs the real client against a recorded response, so the
 // wire format and the JSON output are checked together.
 func TestTagsEndToEnd(t *testing.T) {

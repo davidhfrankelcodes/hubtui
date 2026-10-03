@@ -45,6 +45,7 @@ hubtui grafana/grafana    # any namespace works; docker.io/ prefixes are accepte
 | `/` | Filter tags by regex; on the Search screen, edit the query |
 | `s` | Cycle sort: pushed, name, size |
 | `a` | Cycle architecture filter |
+| `u` | Hide unstable tags: rc, beta, nightly, dev and commit builds |
 | `y` | Yank `image:tag` |
 | `Y` | Yank `image:tag@sha256:...` |
 | `p` | Yank `docker pull image:tag` |
@@ -56,6 +57,8 @@ hubtui grafana/grafana    # any namespace works; docker.io/ prefixes are accepte
 Name sorting understands versions, so `17.9` comes before `17.10`. The size shown for a tag is the linux/amd64 image, or the filtered architecture's when `a` is active. Sorting and filtering apply to the tags loaded so far; more load as you scroll, and a filter keeps loading until it has enough matches to fill the screen.
 
 The tag detail screen lists the tag's **aliases**: other tags with the same index digest, so you can see that `latest` is currently `1.31`, `mainline` and `trixie`. Only loaded tags are searched. When Docker Hub has more tags than were loaded, the line says how many it looked through.
+
+`u` judges tags by name alone. It hides whole words such as `rc`, `alpha`, `beta`, `nightly`, `dev`, `tip`, `edge` and Debian's `sid`, `unstable`, `testing` and `experimental`, pre-release suffixes like `3.15.0b4` and `8.8-m03`, and commit-hash tags. Date-stamped tags stay, since distributions use them for stable snapshots. It cannot recognize a development codename such as Ubuntu's next release.
 
 ### Yanking
 
@@ -69,10 +72,10 @@ Copies go out as an OSC 52 escape sequence, which reaches your local clipboard e
 
 ```sh
 hubtui search <query> --json
-hubtui tags <image> --json [--arch <arch>] [--limit <n>]
+hubtui tags <image> --json [--arch <arch>] [--limit <n>] [--stable]
 ```
 
-Tags come newest first. `--limit` defaults to 100; `0` means everything Docker Hub will return. `--arch` accepts `arm64`, `linux/arm64`, `arm/v7` and similar, and keeps the tags that have that platform.
+Tags come newest first. `--limit` defaults to 100; `0` means everything Docker Hub will return. `--arch` accepts `arm64`, `linux/arm64`, `arm/v7` and similar, and keeps the tags that have that platform. `--stable` leaves out the same tags as `u`.
 
 ```sh
 # Official images matching a query

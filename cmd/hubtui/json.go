@@ -64,8 +64,20 @@ func (a *app) searchJSON(ctx context.Context, query string) int {
 	return a.writeJSON(out)
 }
 
-func (a *app) tagsJSON(ctx context.Context, repo hub.Repo, arch string, limit int) int {
-	tags, err := collectTags(ctx, a.registry, repo, arch, limit)
+// tagFilter selects which tags `hubtui tags` prints.
+type tagFilter struct {
+	arch   string
+	stable bool
+}
+
+func (f tagFilter) empty() bool { return f.arch == "" && !f.stable }
+
+func (f tagFilter) keep(t hub.Tag) bool {
+	return (f.arch == "" || t.HasPlatform(f.arch)) && (!f.stable || !hub.IsPrerelease(t.Name))
+}
+
+func (a *app) tagsJSON(ctx context.Context, repo hub.Repo, filter tagFilter, limit int) int {
+	tags, err := collectTags(ctx, a.registry, repo, filter, limit)
 	switch {
 	case errors.Is(err, hub.ErrPageLimit):
 		// Partial results are still useful; say why the list stops short.
@@ -103,10 +115,10 @@ func (a *app) tagsJSON(ctx context.Context, repo hub.Repo, arch string, limit in
 
 // collectTags pages through tags newest first until it has limit matches
 // (0 means no limit) or runs out. On error it returns what it collected so far.
-func collectTags(ctx context.Context, reg hub.Registry, repo hub.Repo, arch string, limit int) ([]hub.Tag, error) {
+func collectTags(ctx context.Context, reg hub.Registry, repo hub.Repo, filter tagFilter, limit int) ([]hub.Tag, error) {
 	// Without a filter every tag counts, so don't download more than needed.
 	size := hub.MaxPageSize
-	if arch == "" && limit > 0 {
+	if filter.empty() && limit > 0 {
 		size = min(limit, hub.MaxPageSize)
 	}
 
@@ -117,7 +129,7 @@ func collectTags(ctx context.Context, reg hub.Registry, repo hub.Repo, arch stri
 			return out, fmt.Errorf("fetching page %d: %w", page, err)
 		}
 		for _, t := range p.Tags {
-			if arch != "" && !t.HasPlatform(arch) {
+			if !filter.keep(t) {
 				continue
 			}
 			out = append(out, t)

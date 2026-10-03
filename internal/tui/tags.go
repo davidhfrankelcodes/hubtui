@@ -76,6 +76,8 @@ type tagsScreen struct {
 	// arch is the platform filter, as Platform.String() ("linux/arm64/v8");
 	// empty shows every tag.
 	arch string
+	// stable hides prereleases, dev builds and commit builds.
+	stable bool
 }
 
 // newTagsScreen returns the Tags screen for repo. Requests derive from ctx.
@@ -106,6 +108,7 @@ func (m *tagsScreen) help() []helpEntry {
 		{"enter", "tag detail (platforms)"},
 		{"/", "filter tags by regex"},
 		{"a", "cycle architecture filter"},
+		{"u", "hide unstable tags (rc, beta, nightly, …)"},
 		{"s", "cycle sort: pushed, name, size"},
 		{"y", "yank image:tag"},
 		{"Y", "yank image:tag@sha256:… (multi-arch)"},
@@ -252,6 +255,10 @@ func (m *tagsScreen) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.arch = nextArch(m.archOptions(), m.arch)
 		m.rebuild()
 		return m.maybeLoadMore()
+	case "u":
+		m.stable = !m.stable
+		m.rebuild()
+		return m.maybeLoadMore()
 	case "enter":
 		if t, ok := m.selected(); ok {
 			return openDetail(m.repo, t, m.aliasInfo(t))
@@ -334,7 +341,7 @@ func (m *tagsScreen) rebuild() {
 
 	m.visible = m.visible[:0]
 	for i, t := range m.all {
-		if (m.filterRE == nil || m.filterRE.MatchString(t.Name)) && (m.arch == "" || t.HasPlatform(m.arch)) {
+		if (m.filterRE == nil || m.filterRE.MatchString(t.Name)) && (m.arch == "" || t.HasPlatform(m.arch)) && (!m.stable || !hub.IsPrerelease(t.Name)) {
 			m.visible = append(m.visible, i)
 		}
 	}
@@ -507,6 +514,9 @@ func (m *tagsScreen) statusLine() string {
 	}
 	if m.arch != "" {
 		right = append(right, "arch: "+shortPlatform(m.arch))
+	}
+	if m.stable {
+		right = append(right, "stable")
 	}
 	right = append(right, fmt.Sprintf("%d/%d loaded", len(m.all), m.total), "sort: "+m.sort.String())
 	return m.bar.render(m.styles, m.width, strings.Join(right, " · "), m.loading)

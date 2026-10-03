@@ -98,6 +98,7 @@ Verify each endpoint against the live API with `curl` before writing the client 
 | `/` | Filter current list (regex on the Tags screen) |
 | `s` | Cycle sort: pushed, name, size |
 | `a` | Cycle architecture filter |
+| `u` | Toggle hiding unstable tags (rc, beta, nightly, ...) |
 | `y` | Yank `image:tag` |
 | `Y` | Yank `image:tag@sha256:...` |
 | `p` | Yank `docker pull image:tag` |
@@ -112,7 +113,7 @@ Yanking shows a one-line confirmation in the status bar with exactly what was co
 
 ```
 hubtui search <query> --json
-hubtui tags <image> --json [--arch <arch>] [--limit <n>]
+hubtui tags <image> --json [--arch <arch>] [--limit <n>] [--stable]
 ```
 
 Prints JSON to stdout and exits. No TUI, no color, errors to stderr with a non-zero exit code. If stdout is not a TTY and no subcommand is given, print usage instead of starting the TUI.

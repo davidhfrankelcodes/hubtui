@@ -26,7 +26,7 @@ const usage = `Usage:
   hubtui                          search Docker Hub interactively
   hubtui <image>                  browse an image's tags interactively
   hubtui search <query> --json
-  hubtui tags <image> --json [--arch <arch>] [--limit <n>]
+  hubtui tags <image> --json [--arch <arch>] [--limit <n>] [--stable]
   hubtui --version
 
 Set DOCKERHUB_USERNAME and DOCKERHUB_TOKEN (a personal access token) to
@@ -152,10 +152,11 @@ func (a *app) runSearch(ctx context.Context, args []string) int {
 }
 
 func (a *app) runTags(ctx context.Context, args []string) int {
-	fs := a.flagSet("tags", "Usage: hubtui tags <image> --json [--arch <arch>] [--limit <n>]\n")
+	fs := a.flagSet("tags", "Usage: hubtui tags <image> --json [--arch <arch>] [--limit <n>] [--stable]\n")
 	asJSON := fs.Bool("json", false, "print tags as JSON (required)")
 	arch := fs.String("arch", "", "only tags with this platform: arm64, linux/arm64, arm/v7, ...")
 	limit := fs.Int("limit", 100, "maximum number of tags; 0 for all that Docker Hub will return")
+	stable := fs.Bool("stable", false, "leave out prereleases, dev builds and commit builds (rc, beta, nightly, ...)")
 	var pos []string
 	if code, ok := a.parse(fs, args, &pos); !ok {
 		return code
@@ -173,7 +174,7 @@ func (a *app) runTags(ctx context.Context, args []string) int {
 	if err != nil {
 		return a.usageError(fs, "tags: "+err.Error())
 	}
-	return a.tagsJSON(ctx, repo, strings.ToLower(strings.TrimSpace(*arch)), *limit)
+	return a.tagsJSON(ctx, repo, tagFilter{arch: strings.ToLower(strings.TrimSpace(*arch)), stable: *stable}, *limit)
 }
 
 func (a *app) flagSet(name, synopsis string) *flag.FlagSet {
