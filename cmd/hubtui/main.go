@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/davidhfrankelcodes/hubtui/internal/hub"
+	"github.com/davidhfrankelcodes/hubtui/internal/tui"
 )
 
 // version is set at build time via -ldflags "-X main.version=...".
@@ -20,6 +21,7 @@ var version = "" //nolint:gochecknoglobals // the linker can only inject into pa
 
 const usage = `Usage:
   hubtui [--version]
+  hubtui <image>                  browse tags interactively
   hubtui search <query> --json
   hubtui tags <image> --json [--arch <arch>] [--limit <n>]
 `
@@ -30,10 +32,14 @@ const (
 	exitUsage = 2
 )
 
-// app holds what commands need, so tests can swap the registry and streams.
+// app holds what commands need, so tests can swap the registry, streams and
+// terminal.
 type app struct {
 	stdout, stderr io.Writer
 	registry       hub.Registry
+	// stdoutIsTTY gates the TUI: piped output gets usage, not escape codes.
+	stdoutIsTTY bool
+	openTagsTUI func(context.Context, hub.Repo) error
 }
 
 func main() {
@@ -50,7 +56,15 @@ func mainCode() int {
 		fmt.Fprintf(os.Stderr, "hubtui: %v\n", err)
 		return exitError
 	}
-	a := &app{stdout: os.Stdout, stderr: os.Stderr, registry: client}
+	a := &app{
+		stdout:      os.Stdout,
+		stderr:      os.Stderr,
+		registry:    client,
+		stdoutIsTTY: isTerminal(os.Stdout),
+		openTagsTUI: func(ctx context.Context, repo hub.Repo) error {
+			return tui.RunTags(ctx, hub.NewCache(client, hub.DefaultCacheTTL), repo)
+		},
+	}
 	return a.run(ctx, os.Args[1:])
 }
 
@@ -66,17 +80,33 @@ func (a *app) run(ctx context.Context, args []string) int {
 
 	fs := a.flagSet("hubtui", usage)
 	showVersion := fs.Bool("version", false, "print version and exit")
-	if code, ok := a.parse(fs, args, nil); !ok {
+	var pos []string
+	if code, ok := a.parse(fs, args, &pos); !ok {
 		return code
 	}
 	if *showVersion {
 		_, _ = fmt.Fprintf(a.stdout, "hubtui %s\n", resolveVersion(version))
 		return exitOK
 	}
+	// The search screen arrives in a later step; until then an image is required.
+	if len(pos) != 1 || !a.stdoutIsTTY {
+		fs.Usage()
+		return exitUsage
+	}
 
-	// The TUI arrives in a later step; until then there is nothing to run.
-	fs.Usage()
-	return exitUsage
+	repo, err := hub.ParseRepo(pos[0])
+	if err != nil {
+		return a.usageError(fs, err.Error())
+	}
+	if err := a.openTagsTUI(ctx, repo); err != nil {
+		return a.fail(err)
+	}
+	return exitOK
+}
+
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
 func (a *app) runSearch(ctx context.Context, args []string) int {

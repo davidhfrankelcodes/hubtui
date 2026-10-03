@@ -38,6 +38,8 @@ type Registry interface {
 type PageOptions struct {
 	Page     int
 	PageSize int
+	// Fresh asks caching layers to bypass and refresh their copy.
+	Fresh bool
 }
 
 func (o PageOptions) normalize() (page, size int) {
