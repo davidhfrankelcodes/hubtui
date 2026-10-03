@@ -25,6 +25,10 @@ type searchResultJSON struct {
 
 type tagJSON struct {
 	Name string `json:"name"`
+	// Reference and PinnedReference come from the same code as the TUI's yank
+	// keys. PinnedReference is null when the tag cannot be pinned.
+	Reference       string  `json:"reference"`
+	PinnedReference *string `json:"pinned_reference"`
 	// Digest is null, not "", when Hub has none, so `select(.digest)` works in jq.
 	Digest    *string        `json:"digest"`
 	MediaType string         `json:"media_type"`
@@ -72,7 +76,15 @@ func (a *app) tagsJSON(ctx context.Context, repo hub.Repo, arch string, limit in
 
 	out := make([]tagJSON, 0, len(tags))
 	for _, t := range tags {
-		tj := tagJSON{Name: t.Name, MediaType: t.MediaType, Platforms: make([]platformJSON, 0, len(t.Platforms))}
+		ref, err := hub.Reference(repo, t.Name)
+		if err != nil {
+			// Never print a list with a bad reference in it for scripts to use.
+			return a.fail(err)
+		}
+		tj := tagJSON{Name: t.Name, Reference: ref, MediaType: t.MediaType, Platforms: make([]platformJSON, 0, len(t.Platforms))}
+		if pinned, err := hub.PinnedReference(repo, t); err == nil {
+			tj.PinnedReference = &pinned
+		}
 		if t.Digest != "" {
 			tj.Digest = &t.Digest
 		}

@@ -11,8 +11,12 @@ import (
 )
 
 // RunTags runs the TUI on the Tags screen for repo until the user quits.
-func RunTags(ctx context.Context, reg hub.Registry, repo hub.Repo) error {
-	m := NewTagsModel(ctx, reg, repo, time.Now)
+// A nil deps.Now defaults to time.Now.
+func RunTags(ctx context.Context, deps Deps, repo hub.Repo) error {
+	if deps.Now == nil {
+		deps.Now = time.Now
+	}
+	m := NewTagsModel(ctx, deps, repo)
 	if _, err := tea.NewProgram(m, tea.WithContext(ctx)).Run(); err != nil {
 		return fmt.Errorf("running TUI: %w", err)
 	}

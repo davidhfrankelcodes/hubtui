@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/davidhfrankelcodes/hubtui/internal/clip"
 	"github.com/davidhfrankelcodes/hubtui/internal/hub"
 )
 
@@ -78,8 +79,26 @@ func makeTags(prefix string, n int) []hub.Tag {
 	return tags
 }
 
+// fakeClipboard records what the native clipboard was asked to hold.
+type fakeClipboard struct {
+	mu     sync.Mutex
+	copied []string
+	err    error
+}
+
+func (c *fakeClipboard) Copy(_ context.Context, text string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.copied = append(c.copied, text)
+	return c.err
+}
+
 func newTestModel(reg hub.Registry) TagsModel {
-	m := NewTagsModel(context.Background(), reg, hub.Repo{Namespace: "library", Name: "nginx"}, testNow)
+	return newTestModelFor(reg, &fakeClipboard{}, hub.Repo{Namespace: "library", Name: "nginx"})
+}
+
+func newTestModelFor(reg hub.Registry, cb Copier, repo hub.Repo) TagsModel {
+	m := NewTagsModel(context.Background(), Deps{Registry: reg, Clipboard: cb, Now: testNow}, repo)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	return next.(TagsModel)
 }
@@ -582,4 +601,216 @@ func spannedWidth(m TagsModel) int {
 		}
 	}
 	return total
+}
+
+// runCmds runs cmd, expanding batches, and returns the messages produced
+// promptly. Timers (cursor blink, status expiry) are left unrun.
+func runCmds(t *testing.T, cmd tea.Cmd) []tea.Msg {
+	t.Helper()
+	if cmd == nil {
+		return nil
+	}
+	results := make(chan tea.Msg, 1)
+	go func() { results <- cmd() }()
+	select {
+	case msg := <-results:
+		if batch, ok := msg.(tea.BatchMsg); ok {
+			var out []tea.Msg
+			for _, c := range batch {
+				out = append(out, runCmds(t, c)...)
+			}
+			return out
+		}
+		return []tea.Msg{msg}
+	case <-time.After(100 * time.Millisecond):
+		return nil
+	}
+}
+
+// osc52Payload finds the text tea.SetClipboard was asked to send. Its message
+// type is unexported, so it is recognized by name.
+func osc52Payload(msgs []tea.Msg) (string, bool) {
+	for _, m := range msgs {
+		if fmt.Sprintf("%T", m) == "tea.setClipboardMsg" {
+			return fmt.Sprint(m), true
+		}
+	}
+	return "", false
+}
+
+const pinnedDigest = "sha256:756444d493424be61c13714ec55c97a733942d67772fca9d1724fb264f8bde08"
+
+// TestYank is exact-match on purpose: a wrong reference is the worst bug
+// this tool can have.
+func TestYank(t *testing.T) {
+	multiArch := hub.Tag{
+		Name:      "stable-alpine3.24-perl",
+		Digest:    pinnedDigest,
+		MediaType: "application/vnd.oci.image.index.v1+json",
+		Pushed:    testNow(),
+		Platforms: []hub.Platform{
+			{OS: "linux", Arch: "amd64", Digest: "sha256:604b4e5233f9c948f4d26392354d76c582a4ce19833816374c1307b7fb59b53b", Size: 1},
+			{OS: "linux", Arch: "arm64", Variant: "v8", Digest: "sha256:918e8d119b7c1ff9b0e5bcc65b054417c35cce2a34efdfbdb33030e6ea13bafe", Size: 1},
+		},
+	}
+	legacy := hub.Tag{Name: "1.9.8", MediaType: "application/vnd.docker.distribution.manifest.v1+prettyjws", Pushed: testNow()}
+	nginx := hub.Repo{Namespace: "library", Name: "nginx"}
+	grafana := hub.Repo{Namespace: "grafana", Name: "grafana"}
+
+	tests := []struct {
+		name      string
+		repo      hub.Repo
+		tag       hub.Tag
+		key       string
+		want      string // empty: nothing may be copied
+		wantError string
+	}{
+		{name: "y official", repo: nginx, tag: multiArch, key: "y", want: "nginx:stable-alpine3.24-perl"},
+		{name: "Y official uses the index digest", repo: nginx, tag: multiArch, key: "Y", want: "nginx:stable-alpine3.24-perl@" + pinnedDigest},
+		{name: "p official", repo: nginx, tag: multiArch, key: "p", want: "docker pull nginx:stable-alpine3.24-perl"},
+		{name: "y namespaced", repo: grafana, tag: multiArch, key: "y", want: "grafana/grafana:stable-alpine3.24-perl"},
+		{name: "Y namespaced", repo: grafana, tag: multiArch, key: "Y", want: "grafana/grafana:stable-alpine3.24-perl@" + pinnedDigest},
+		{name: "p namespaced", repo: grafana, tag: multiArch, key: "p", want: "docker pull grafana/grafana:stable-alpine3.24-perl"},
+		{name: "y legacy still works", repo: nginx, tag: legacy, key: "y", want: "nginx:1.9.8"},
+		{name: "Y legacy refuses", repo: nginx, tag: legacy, key: "Y", wantError: "not copied: nginx:1.9.8 uses a legacy schema-1 manifest"},
+		{name: "invalid tag refuses", repo: nginx, tag: hub.Tag{Name: "bad tag", Digest: pinnedDigest}, key: "y", wantError: "not copied: invalid tag"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cb := &fakeClipboard{}
+			reg := &fakeRegistry{tags: []hub.Tag{tt.tag}, pageSize: 100}
+			m := newTestModelFor(reg, cb, tt.repo)
+			m = settle(t, m, m.Init())
+
+			m, cmd := press(t, m, tt.key)
+			msgs := runCmds(t, cmd)
+			payload, sentOSC52 := osc52Payload(msgs)
+
+			if tt.want == "" {
+				if sentOSC52 || len(cb.copied) != 0 {
+					t.Errorf("copied %q / %v despite the error", payload, cb.copied)
+				}
+				if !m.statusIsErr || !strings.HasPrefix(m.status, tt.wantError) {
+					t.Errorf("status = %q (error %v), want error starting %q", m.status, m.statusIsErr, tt.wantError)
+				}
+				return
+			}
+
+			if !sentOSC52 || payload != tt.want {
+				t.Errorf("OSC 52 payload = %q (sent %v), want %q", payload, sentOSC52, tt.want)
+			}
+			if len(cb.copied) != 1 || cb.copied[0] != tt.want {
+				t.Errorf("native clipboard got %q, want [%q]", cb.copied, tt.want)
+			}
+			if wantStatus := "copied " + tt.want; m.status != wantStatus || m.statusIsErr {
+				t.Errorf("status = %q, want %q", m.status, wantStatus)
+			}
+		})
+	}
+}
+
+func TestYankStatusLine(t *testing.T) {
+	tag := hub.Tag{Name: "stable-alpine3.24-perl", Digest: pinnedDigest, MediaType: "application/vnd.oci.image.index.v1+json", Pushed: testNow()}
+	reg := &fakeRegistry{tags: []hub.Tag{tag}, pageSize: 100}
+
+	m := newTestModel(reg)
+	m = settle(t, m, m.Init())
+	m, _ = update(t, m, tea.WindowSizeMsg{Width: 200, Height: 24})
+	m, _ = press(t, m, "Y")
+	line := m.statusLine()
+	if !strings.Contains(line, "copied nginx:stable-alpine3.24-perl@"+pinnedDigest) {
+		t.Errorf("wide status line %q does not show the full reference", line)
+	}
+
+	m, _ = update(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	line = m.statusLine()
+	if w := len([]rune(stripANSI(line))); w > 80 {
+		t.Errorf("status line is %d cells wide at 80 columns", w)
+	}
+	plain := stripANSI(line)
+	if !strings.HasPrefix(plain, "copied nginx:stable-alpine3.24-perl@sha256:") || !strings.Contains(plain, "…") ||
+		!strings.HasSuffix(strings.TrimRight(plain, " "), "fca9d1724fb264f8bde08") {
+		t.Errorf("narrow status line %q should keep the image and both ends of the digest", plain)
+	}
+}
+
+func TestYankFlashExpires(t *testing.T) {
+	reg := &fakeRegistry{tags: makeTags("t", 3), pageSize: 100}
+	m := newTestModel(reg)
+	m = settle(t, m, m.Init())
+
+	m, _ = press(t, m, "y")
+	first := m.statusID
+	m, _ = press(t, m, "j", "y")
+	if m.status != "copied nginx:t1" {
+		t.Fatalf("status = %q", m.status)
+	}
+
+	m, _ = update(t, m, clearStatusMsg{id: first})
+	if m.status == "" {
+		t.Error("an older flash's expiry cleared a newer message")
+	}
+	m, _ = update(t, m, clearStatusMsg{id: m.statusID})
+	if m.status != "" {
+		t.Errorf("status = %q after expiry", m.status)
+	}
+}
+
+func TestYankNativeClipboardResult(t *testing.T) {
+	tests := []struct {
+		name    string
+		err     error
+		wantErr bool
+	}{
+		{name: "success keeps the confirmation", err: nil},
+		{name: "no native clipboard is fine, OSC 52 was sent", err: fmt.Errorf("remote session: %w", clip.ErrUnavailable)},
+		{name: "a failing tool is reported", err: fmt.Errorf("wl-copy: exit status 1"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reg := &fakeRegistry{tags: makeTags("t", 1), pageSize: 100}
+			m := newTestModelFor(reg, &fakeClipboard{err: tt.err}, hub.Repo{Namespace: "library", Name: "nginx"})
+			m = settle(t, m, m.Init())
+			m, cmd := press(t, m, "y")
+			for _, msg := range runCmds(t, cmd) {
+				if cm, ok := msg.(clipboardMsg); ok {
+					m, _ = update(t, m, cm)
+				}
+			}
+			if m.statusIsErr != tt.wantErr {
+				t.Errorf("status = %q (error %v), want error %v", m.status, m.statusIsErr, tt.wantErr)
+			}
+			if !tt.wantErr && m.status != "copied nginx:t0" {
+				t.Errorf("status = %q", m.status)
+			}
+		})
+	}
+}
+
+func TestYankWithNothingSelected(t *testing.T) {
+	cb := &fakeClipboard{}
+	reg := &fakeRegistry{pageSize: 100}
+	m := newTestModelFor(reg, cb, hub.Repo{Namespace: "library", Name: "nginx"})
+	m = settle(t, m, m.Init())
+	m, cmd := press(t, m, "y")
+	if _, sent := osc52Payload(runCmds(t, cmd)); sent || len(cb.copied) != 0 {
+		t.Error("copied something with no tag selected")
+	}
+	if !m.statusIsErr {
+		t.Errorf("status = %q, want an error", m.status)
+	}
+}
+
+func stripANSI(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == 0x1b {
+			for i < len(s) && s[i] != 'm' {
+				i++
+			}
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }

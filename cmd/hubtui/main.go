@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"strings"
 
+	"github.com/davidhfrankelcodes/hubtui/internal/clip"
 	"github.com/davidhfrankelcodes/hubtui/internal/hub"
 	"github.com/davidhfrankelcodes/hubtui/internal/tui"
 )
@@ -62,7 +63,10 @@ func mainCode() int {
 		registry:    client,
 		stdoutIsTTY: isTerminal(os.Stdout),
 		openTagsTUI: func(ctx context.Context, repo hub.Repo) error {
-			return tui.RunTags(ctx, hub.NewCache(client, hub.DefaultCacheTTL), repo)
+			return tui.RunTags(ctx, tui.Deps{
+				Registry:  hub.NewCache(client, hub.DefaultCacheTTL),
+				Clipboard: clip.NewNative(),
+			}, repo)
 		},
 	}
 	return a.run(ctx, os.Args[1:])

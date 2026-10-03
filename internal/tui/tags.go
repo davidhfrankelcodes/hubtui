@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/davidhfrankelcodes/hubtui/internal/clip"
 	"github.com/davidhfrankelcodes/hubtui/internal/hub"
 )
 
@@ -33,6 +34,28 @@ func (s sortMode) String() string {
 	return [...]string{"pushed", "name", "size"}[s]
 }
 
+// Copier puts text on the native clipboard.
+type Copier interface {
+	Copy(ctx context.Context, text string) error
+}
+
+// Deps are the outside services screens use.
+type Deps struct {
+	Registry  hub.Registry
+	Clipboard Copier
+	Now       func() time.Time
+}
+
+// flashDuration is how long a confirmation stays in the status bar.
+const flashDuration = 4 * time.Second
+
+// clearStatusMsg expires the flash with the same id; a newer message keeps
+// its full time.
+type clearStatusMsg struct{ id int }
+
+// clipboardMsg reports the native clipboard result for a yank.
+type clipboardMsg struct{ err error }
+
 // tagsPageMsg carries one fetched page back to Update. id ties it to the
 // request that produced it so late responses can be dropped.
 type tagsPageMsg struct {
@@ -46,6 +69,7 @@ type tagsPageMsg struct {
 type TagsModel struct {
 	ctx    context.Context
 	reg    hub.Registry
+	clip   Copier
 	now    func() time.Time
 	styles styles
 	repo   hub.Repo
@@ -77,12 +101,16 @@ type TagsModel struct {
 	width, height int
 	status        string
 	statusIsErr   bool
+	// statusExact marks a status (a yank confirmation) that must be shown in
+	// full, at the expense of the counters.
+	statusExact bool
+	statusID    int
 
 	initCmd tea.Cmd
 }
 
 // NewTagsModel returns the Tags screen for repo. Requests derive from ctx.
-func NewTagsModel(ctx context.Context, reg hub.Registry, repo hub.Repo, now func() time.Time) TagsModel {
+func NewTagsModel(ctx context.Context, deps Deps, repo hub.Repo) TagsModel {
 	st := newStyles()
 	in := textinput.New()
 	in.Prompt = "/"
@@ -92,8 +120,9 @@ func NewTagsModel(ctx context.Context, reg hub.Registry, repo hub.Repo, now func
 
 	m := TagsModel{
 		ctx:      ctx,
-		reg:      reg,
-		now:      now,
+		reg:      deps.Registry,
+		clip:     deps.Clipboard,
+		now:      deps.Now,
 		styles:   st,
 		repo:     repo,
 		seen:     map[string]bool{},
@@ -144,6 +173,18 @@ func (m TagsModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.maybeLoadMore()
 	case tagsPageMsg:
 		return m.handlePage(msg)
+	case clearStatusMsg:
+		if msg.id == m.statusID {
+			m.setStatus("", false)
+		}
+		return m, nil
+	case clipboardMsg:
+		// OSC 52 was already sent, so a missing native tool is expected
+		// (SSH, headless); only a tool that ran and failed is worth showing.
+		if msg.err != nil && !errors.Is(msg.err, clip.ErrUnavailable) {
+			m.setStatus("native clipboard failed (OSC 52 was sent): "+msg.err.Error(), true)
+		}
+		return m, nil
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			return m.quit()
@@ -179,7 +220,7 @@ func (m TagsModel) handlePage(msg tagsPageMsg) (tea.Model, tea.Cmd) {
 
 	if msg.page == 1 {
 		m.all, m.seen = nil, map[string]bool{}
-		m.status, m.statusIsErr = "", false
+		m.setStatus("", false)
 	}
 	for _, t := range msg.res.Tags {
 		// A push while paging shifts later pages, so a tag can show up twice.
@@ -195,25 +236,36 @@ func (m TagsModel) handlePage(msg tagsPageMsg) (tea.Model, tea.Cmd) {
 	return m, m.maybeLoadMore()
 }
 
+// setStatus replaces the status message; it also invalidates any pending
+// flash expiry so the new message is not cleared early.
+func (m *TagsModel) setStatus(s string, isErr bool) {
+	m.status, m.statusIsErr, m.statusExact = s, isErr, false
+	m.statusID++
+}
+
+// flash shows a confirmation that clears itself.
+func (m *TagsModel) flash(s string) tea.Cmd {
+	m.setStatus(s, false)
+	m.statusExact = true
+	id := m.statusID
+	return tea.Tick(flashDuration, func(time.Time) tea.Msg { return clearStatusMsg{id: id} })
+}
+
 func (m *TagsModel) setError(err error) {
 	var rl *hub.RateLimitError
 	switch {
 	case errors.Is(err, hub.ErrPageLimit):
 		// Not a failure: Hub simply stops here for anonymous users.
 		m.hasNext = false
-		m.status = fmt.Sprintf("anonymous limit: first %d tags", len(m.all))
-		m.statusIsErr = false
-		return
+		m.setStatus(fmt.Sprintf("anonymous limit: first %d tags", len(m.all)), false)
 	case errors.Is(err, hub.ErrNotFound):
-		m.status = fmt.Sprintf("repository %s not found", m.repo)
+		m.setStatus(fmt.Sprintf("repository %s not found", m.repo), true)
 	case errors.As(err, &rl):
-		m.status = rl.Error() + " (press r to retry)"
+		m.setStatus(rl.Error()+" (press r to retry)", true)
 	case errors.Is(err, context.Canceled):
-		return
 	default:
-		m.status = err.Error() + " (press r to retry)"
+		m.setStatus(err.Error()+" (press r to retry)", true)
 	}
-	m.statusIsErr = true
 }
 
 func (m TagsModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -235,13 +287,47 @@ func (m TagsModel) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "r":
 		m.stalled = false
-		m.status, m.statusIsErr = "refreshing…", false
+		m.setStatus("refreshing…", false)
 		return m, m.fetch(m.ctx, 1, true)
+	case "y", "Y", "p":
+		return m.yank(msg.String())
 	}
 
 	var cmd tea.Cmd
 	m.table, cmd = m.table.Update(msg)
 	return m, tea.Batch(cmd, m.maybeLoadMore())
+}
+
+// yankText builds exactly what each yank key copies.
+func yankText(key string, repo hub.Repo, t hub.Tag) (string, error) {
+	switch key {
+	case "Y":
+		return hub.PinnedReference(repo, t)
+	case "p":
+		ref, err := hub.Reference(repo, t.Name)
+		if err != nil {
+			return "", err
+		}
+		return "docker pull " + ref, nil
+	}
+	return hub.Reference(repo, t.Name)
+}
+
+func (m TagsModel) yank(key string) (tea.Model, tea.Cmd) {
+	t, ok := m.Selected()
+	if !ok {
+		m.setStatus("no tag selected", true)
+		return m, nil
+	}
+	text, err := yankText(key, m.repo, t)
+	if err != nil {
+		m.setStatus("not copied: "+err.Error(), true)
+		return m, nil
+	}
+
+	copier, ctx := m.clip, m.ctx
+	native := func() tea.Msg { return clipboardMsg{err: copier.Copy(ctx, text)} }
+	return m, tea.Batch(tea.SetClipboard(text), native, m.flash("copied "+text))
 }
 
 func (m TagsModel) updateFilter(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -420,6 +506,15 @@ func (m TagsModel) statusLine() string {
 	r := m.styles.dim.Render(strings.Join(right, " · "))
 
 	left := m.status
+	if m.statusExact {
+		// A yank confirmation must show what was copied; give it the whole
+		// line, and if even that is too narrow, elide the middle so both
+		// the image and the end of the digest stay checkable.
+		if lipgloss.Width(left)+1+lipgloss.Width(r) > m.width {
+			r = ""
+		}
+		return m.styles.notice.Render(elideMiddle(left, m.width)) + padTo(r, m.width-min(lipgloss.Width(left), m.width))
+	}
 	style := m.styles.notice
 	switch {
 	case m.statusIsErr:
@@ -432,6 +527,37 @@ func (m TagsModel) statusLine() string {
 	l := style.Render(truncate(left, avail))
 	gap := max(m.width-lipgloss.Width(l)-lipgloss.Width(r), 1)
 	return l + strings.Repeat(" ", gap) + r
+}
+
+// padTo right-aligns s in w cells, or returns "" when it does not fit.
+func padTo(s string, w int) string {
+	if s == "" || lipgloss.Width(s)+1 > w {
+		return ""
+	}
+	return strings.Repeat(" ", w-lipgloss.Width(s)) + s
+}
+
+// elideMiddle shortens s to w cells with "…" in the middle. If s contains a
+// digest, the cut falls inside its hex so the image, tag and both ends of
+// the hash stay readable.
+func elideMiddle(s string, w int) string {
+	r := []rune(s)
+	if len(r) <= w {
+		return s
+	}
+	if w < 3 {
+		return string(r[:max(w, 0)])
+	}
+	head := (w - 1) / 2
+	if i := strings.Index(s, "@sha256:"); i >= 0 {
+		// Keep through "@sha256:" plus a few hex digits, if that leaves room
+		// for a tail.
+		if keep := len([]rune(s[:i])) + len("@sha256:") + 6; keep < w-7 {
+			head = max(head, keep)
+		}
+	}
+	tail := w - 1 - head
+	return string(r[:head]) + "…" + string(r[len(r)-tail:])
 }
 
 func truncate(s string, w int) string {

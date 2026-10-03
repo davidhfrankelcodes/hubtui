@@ -96,7 +96,7 @@ func TestRunTUI(t *testing.T) {
 }
 
 func tag(name string, arches ...string) hub.Tag {
-	t := hub.Tag{Name: name, Digest: "sha256:" + name}
+	t := hub.Tag{Name: name, Digest: "sha256:" + strings.Repeat("0", 64)}
 	for _, a := range arches {
 		t.Platforms = append(t.Platforms, hub.Platform{OS: "linux", Arch: a, Digest: "sha256:" + name + "-" + a})
 	}
@@ -203,9 +203,10 @@ func TestSearchJSONEmpty(t *testing.T) {
 
 func TestTagsJSONShape(t *testing.T) {
 	pushed := time.Date(2026, 9, 29, 19, 52, 23, 0, time.UTC)
+	const index = "sha256:756444d493424be61c13714ec55c97a733942d67772fca9d1724fb264f8bde08"
 	reg := &fakeRegistry{tagPages: [][]hub.Tag{{
 		{
-			Name: "1.27", Digest: "sha256:index", MediaType: "application/vnd.oci.image.index.v1+json", Pushed: pushed,
+			Name: "1.27", Digest: index, MediaType: "application/vnd.oci.image.index.v1+json", Pushed: pushed,
 			Platforms: []hub.Platform{{OS: "linux", Arch: "arm64", Variant: "v8", Digest: "sha256:arm", Size: 42}},
 		},
 		{Name: "1.9.8", MediaType: "application/vnd.docker.distribution.manifest.v1+prettyjws"},
@@ -217,7 +218,9 @@ func TestTagsJSONShape(t *testing.T) {
 	want := `[
   {
     "name": "1.27",
-    "digest": "sha256:index",
+    "reference": "nginx:1.27",
+    "pinned_reference": "nginx:1.27@sha256:756444d493424be61c13714ec55c97a733942d67772fca9d1724fb264f8bde08",
+    "digest": "sha256:756444d493424be61c13714ec55c97a733942d67772fca9d1724fb264f8bde08",
     "media_type": "application/vnd.oci.image.index.v1+json",
     "pushed": "2026-09-29T19:52:23Z",
     "platforms": [
@@ -232,6 +235,8 @@ func TestTagsJSONShape(t *testing.T) {
   },
   {
     "name": "1.9.8",
+    "reference": "nginx:1.9.8",
+    "pinned_reference": null,
     "digest": null,
     "media_type": "application/vnd.docker.distribution.manifest.v1+prettyjws",
     "pushed": null,
@@ -381,6 +386,10 @@ func TestTagsEndToEnd(t *testing.T) {
 	}
 	if tags[0].Digest == nil || *tags[0].Digest != "sha256:756444d493424be61c13714ec55c97a733942d67772fca9d1724fb264f8bde08" {
 		t.Errorf("digest = %v, want the index digest", tags[0].Digest)
+	}
+	want := "nginx:stable-alpine3.24-perl@sha256:756444d493424be61c13714ec55c97a733942d67772fca9d1724fb264f8bde08"
+	if tags[0].PinnedReference == nil || *tags[0].PinnedReference != want {
+		t.Errorf("pinned_reference = %v, want %s", tags[0].PinnedReference, want)
 	}
 	if len(tags[0].Platforms) != 8 {
 		t.Errorf("got %d platforms, want 8 (attestations excluded)", len(tags[0].Platforms))
