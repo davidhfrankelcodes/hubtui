@@ -391,6 +391,16 @@ func TestTagsErrors(t *testing.T) {
 			handler:     raw(502, http.Header{"Content-Type": {"text/html"}}, "<html><body>Bad gateway</body></html>"),
 			wantMessage: "unexpected response",
 		},
+		{
+			// Hub's auth layer answers {"detail": ...} instead of {"message": ...}.
+			name:        "error message in detail",
+			handler:     raw(401, nil, `{"detail":"token expired"}`),
+			wantMessage: "token expired",
+		},
+		{
+			name:    "oversized body is refused, not decoded",
+			handler: raw(200, nil, `{"results":[`+strings.Repeat(" ", maxBodyBytes)+`]}`),
+		},
 		{name: "malformed JSON", handler: raw(200, nil, `{"count": 3, "results": [`)},
 		{name: "wrong JSON shape", handler: raw(200, nil, `{"count": "many", "results": {}}`)},
 		{name: "HTML with 200", handler: raw(200, nil, "<html>maintenance</html>")},

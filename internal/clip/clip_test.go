@@ -88,3 +88,9 @@ func TestRunCommandPassesStdin(t *testing.T) {
 		t.Errorf("runCommand: %v", err)
 	}
 }
+
+func TestRunCommandFailure(t *testing.T) {
+	if err := runCommand(context.Background(), "/bin/sh", []string{"-c", "cat >/dev/null; exit 1"}, "x"); err == nil {
+		t.Error("a failing clipboard tool reported success")
+	}
+}

@@ -79,6 +79,14 @@ func TestCacheDoesNotStoreErrors(t *testing.T) {
 	if next.tags != 2 {
 		t.Errorf("upstream calls = %d, want 2", next.tags)
 	}
+	for range 2 {
+		if _, err := c.Search(context.Background(), "nginx", PageOptions{}); err == nil {
+			t.Fatal("expected error")
+		}
+	}
+	if next.searches != 2 {
+		t.Errorf("upstream searches = %d, want 2", next.searches)
+	}
 }
 
 func TestCacheSearch(t *testing.T) {

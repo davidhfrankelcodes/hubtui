@@ -54,3 +54,14 @@ func TestOpen(t *testing.T) {
 		})
 	}
 }
+
+func TestRunCommand(t *testing.T) {
+	// The URL must arrive as a single argument, untouched by any shell.
+	const url = "https://hub.docker.com/_/nginx/tags?name=1.27&page=2"
+	if err := runCommand(context.Background(), "/bin/sh", "-c", `test "$1" = "$2"`, "sh", url, url); err != nil {
+		t.Errorf("runCommand: %v", err)
+	}
+	if err := runCommand(context.Background(), "/bin/sh", "-c", "exit 3"); err == nil {
+		t.Error("a failing launcher reported success")
+	}
+}
