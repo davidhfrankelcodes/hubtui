@@ -104,8 +104,8 @@ func (a *app) run(ctx context.Context, args []string) int {
 
 	fs := a.flagSet("hubtui", usage)
 	showVersion := fs.Bool("version", false, "print version and exit")
-	var pos []string
-	if code, ok := a.parse(fs, args, &pos); !ok {
+	pos, code, ok := a.parse(fs, args)
+	if !ok {
 		return code
 	}
 	if *showVersion {
@@ -139,8 +139,8 @@ func isTerminal(f *os.File) bool {
 func (a *app) runSearch(ctx context.Context, args []string) int {
 	fs := a.flagSet("search", "Usage: hubtui search <query> --json\n")
 	asJSON := fs.Bool("json", false, "print results as JSON (required)")
-	var pos []string
-	if code, ok := a.parse(fs, args, &pos); !ok {
+	pos, code, ok := a.parse(fs, args)
+	if !ok {
 		return code
 	}
 	if len(pos) == 0 {
@@ -158,8 +158,8 @@ func (a *app) runTags(ctx context.Context, args []string) int {
 	arch := fs.String("arch", "", "only tags with this platform: arm64, linux/arm64, arm/v7, ...")
 	limit := fs.Int("limit", 100, "maximum number of tags; 0 for all that Docker Hub will return")
 	stable := fs.Bool("stable", false, "leave out prereleases, dev builds and commit builds (rc, beta, nightly, ...)")
-	var pos []string
-	if code, ok := a.parse(fs, args, &pos); !ok {
+	pos, code, ok := a.parse(fs, args)
+	if !ok {
 		return code
 	}
 	if len(pos) != 1 {
@@ -190,15 +190,14 @@ func (a *app) flagSet(name, synopsis string) *flag.FlagSet {
 
 // parse parses flags anywhere among the arguments, since `hubtui tags nginx
 // --json` is how people type it and the flag package stops at the first
-// positional. Positionals go to pos; a nil pos means none are allowed.
-func (a *app) parse(fs *flag.FlagSet, args []string, pos *[]string) (code int, ok bool) {
-	var positional []string
+// positional. It returns the positional arguments in order.
+func (a *app) parse(fs *flag.FlagSet, args []string) (positional []string, code int, ok bool) {
 	for {
 		if err := fs.Parse(args); err != nil {
 			if errors.Is(err, flag.ErrHelp) {
-				return exitOK, false
+				return nil, exitOK, false
 			}
-			return exitUsage, false
+			return nil, exitUsage, false
 		}
 		rest := fs.Args()
 		if len(rest) == 0 {
@@ -212,14 +211,7 @@ func (a *app) parse(fs *flag.FlagSet, args []string, pos *[]string) (code int, o
 		positional = append(positional, rest[0])
 		args = rest[1:]
 	}
-
-	if pos == nil && len(positional) > 0 {
-		return a.usageError(fs, fmt.Sprintf("unexpected argument %q", positional[0])), false
-	}
-	if pos != nil {
-		*pos = positional
-	}
-	return exitOK, true
+	return positional, exitOK, true
 }
 
 func (a *app) usageError(fs *flag.FlagSet, msg string) int {
