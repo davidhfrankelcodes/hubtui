@@ -54,6 +54,8 @@ func TestErrorWording(t *testing.T) {
 		{"rate limited", fmt.Errorf("listing: %w", &hub.RateLimitError{RetryAfter: 90e9}), "rate limited by Docker Hub until 12:01:30; press r after that"},
 		{"auth", fmt.Errorf("logging in as alice: %w: unauthorized", hub.ErrAuth), "Docker Hub login failed; check DOCKERHUB_TOKEN"},
 		{"other", fmt.Errorf("request failed: dial tcp: no route to host"), "request failed: dial tcp: no route to host (press r to retry)"},
+		// Hub down during login is retryable, not a token problem.
+		{"login server error", fmt.Errorf("logging in as alice: docker hub: 500 Internal Server Error: internal error"), "logging in as alice: docker hub: 500 Internal Server Error: internal error (press r to retry)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

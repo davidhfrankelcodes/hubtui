@@ -36,11 +36,17 @@ func TestLoginFailures(t *testing.T) {
 		name      string
 		login     http.HandlerFunc
 		wantAuth  bool
+		wantText  string
 		wantRetry time.Duration
 	}{
 		{name: "bad credentials", login: raw(401, nil, `{"message":"unauthorized","errinfo":{}}`), wantAuth: true},
-		{name: "no access token", login: raw(200, nil, `{"token":"wrong-field"}`), wantAuth: true},
-		{name: "malformed response", login: raw(200, nil, `<html>`), wantAuth: true},
+		{name: "forbidden", login: raw(403, nil, `{"message":"account locked"}`), wantAuth: true},
+		// Hub misbehaving says nothing about the credentials.
+		{name: "server error", login: raw(500, nil, `{"message":"internal error"}`), wantText: "docker hub: 500 Internal Server Error: internal error"},
+		{name: "CDN error page", login: raw(502, nil, `<html>bad gateway</html>`), wantText: "502 Bad Gateway: unexpected response"},
+		{name: "login endpoint missing", login: raw(404, nil, `{"message":"not found"}`), wantText: "404 Not Found"},
+		{name: "no access token", login: raw(200, nil, `{"token":"wrong-field"}`), wantText: "unexpected response: no access token"},
+		{name: "malformed response", login: raw(200, nil, `<html>`), wantText: "unexpected response: no access token"},
 		{name: "rate limited", login: raw(429, http.Header{"Retry-After": {"45"}}, ""), wantRetry: 45 * time.Second},
 		{name: "rate limited without a hint", login: raw(429, nil, ""), wantRetry: defaultRateLimitWait},
 	}
@@ -62,6 +68,15 @@ func TestLoginFailures(t *testing.T) {
 			}
 			if hits.Load() != 1 {
 				t.Errorf("%d requests, want only the login", hits.Load())
+			}
+			if !strings.Contains(err.Error(), tt.wantText) {
+				t.Errorf("err = %v, want it to contain %q", err, tt.wantText)
+			}
+			// Whatever went wrong, it was not the repository or the paging.
+			for _, sentinel := range []error{ErrNotFound, ErrPageLimit} {
+				if errors.Is(err, sentinel) {
+					t.Errorf("login failure matches %v: %v", sentinel, err)
+				}
 			}
 
 			var rl *RateLimitError

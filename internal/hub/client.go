@@ -354,15 +354,22 @@ func (c *Client) login(ctx context.Context) (Secret, error) {
 		c.blockedUntil = c.now().Add(wait)
 		return "", &RateLimitError{RetryAfter: wait}
 	}
-	if status != http.StatusOK {
+	switch status {
+	case http.StatusOK:
+	case http.StatusUnauthorized, http.StatusForbidden:
 		return "", fmt.Errorf("logging in as %s: %w: %s", c.username, ErrAuth, errorMessage(body))
+	default:
+		// Hub being down is not a credentials problem; telling the user to
+		// check their token would send them the wrong way. Not an *APIError
+		// either: a 404 here must not read as "repository not found".
+		return "", fmt.Errorf("logging in as %s: docker hub: %d %s: %s", c.username, status, http.StatusText(status), errorMessage(body))
 	}
 
 	var res struct {
 		AccessToken string `json:"access_token"`
 	}
 	if err := json.Unmarshal(body, &res); err != nil || res.AccessToken == "" {
-		return "", fmt.Errorf("logging in as %s: %w: no access token in response", c.username, ErrAuth)
+		return "", fmt.Errorf("logging in as %s: unexpected response: no access token", c.username)
 	}
 	return Secret(res.AccessToken), nil
 }
