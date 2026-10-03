@@ -100,11 +100,14 @@ func TestDisplaySize(t *testing.T) {
 		{OS: "windows", Arch: "amd64", Size: 2},
 		{OS: "linux", Arch: "amd64", Size: 3},
 	}}
-	if got := displaySize(tag); got != 3 {
+	if got := displaySize(tag, ""); got != 3 {
 		t.Errorf("displaySize = %d, want the linux/amd64 size", got)
 	}
-	if got := displaySize(hub.Tag{Platforms: []hub.Platform{{Arch: "arm64", Size: 7}}}); got != 7 {
+	if got := displaySize(hub.Tag{Platforms: []hub.Platform{{Arch: "arm64", Size: 7}}}, ""); got != 7 {
 		t.Errorf("displaySize without amd64 = %d, want the first platform's", got)
+	}
+	if got := displaySize(tag, "linux/arm64"); got != 1 {
+		t.Errorf("displaySize filtered to arm64 = %d, want that platform's size", got)
 	}
 }
 

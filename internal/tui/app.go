@@ -15,10 +15,16 @@ type Copier interface {
 	Copy(ctx context.Context, text string) error
 }
 
+// Opener opens a URL in the user's browser.
+type Opener interface {
+	Open(ctx context.Context, url string) error
+}
+
 // Deps are the outside services screens use.
 type Deps struct {
 	Registry  hub.Registry
 	Clipboard Copier
+	Browser   Opener
 	Now       func() time.Time
 }
 
@@ -33,6 +39,10 @@ type screen interface {
 	// resume restarts whatever is needed when it is uncovered.
 	suspend()
 	resume() tea.Cmd
+	// capturesText reports whether keys are going into a text field, where
+	// "?" and "q" are just characters.
+	capturesText() bool
+	help() []helpEntry
 }
 
 // addressed messages belong to one screen. Each screen has an ID that is
@@ -45,20 +55,31 @@ type addressed interface {
 // openTagsMsg asks the App to push the Tags screen for repo.
 type openTagsMsg struct{ repo hub.Repo }
 
+// openDetailMsg asks the App to push the detail screen for one tag.
+type openDetailMsg struct {
+	repo hub.Repo
+	tag  hub.Tag
+}
+
 // backMsg asks the App to pop the top screen.
 type backMsg struct{}
 
 func openTags(repo hub.Repo) tea.Cmd { return func() tea.Msg { return openTagsMsg{repo: repo} } }
 
+func openDetail(repo hub.Repo, t hub.Tag) tea.Cmd {
+	return func() tea.Msg { return openDetailMsg{repo: repo, tag: t} }
+}
+
 func back() tea.Msg { return backMsg{} }
 
 // App is the root model: a stack of screens plus the window size.
 type App struct {
-	ctx    context.Context
-	deps   Deps
-	stack  []screen
-	nextID int
-	size   tea.WindowSizeMsg
+	ctx      context.Context
+	deps     Deps
+	stack    []screen
+	nextID   int
+	size     tea.WindowSizeMsg
+	showHelp bool
 }
 
 // NewApp returns an App showing the Tags screen for repo, or the Search
@@ -104,11 +125,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, tea.Quit
 		}
+		// While help is up, any key just closes it.
+		if a.showHelp {
+			a.showHelp = false
+			return a, nil
+		}
+		if msg.String() == "?" && !a.top().capturesText() {
+			a.showHelp = true
+			return a, nil
+		}
 	case openTagsMsg:
-		a.top().suspend()
-		s := newTagsScreen(a.ctx, a.deps, a.newID(), msg.repo)
-		a.stack = append(a.stack, s)
-		return a, tea.Batch(s.update(a.size), s.init())
+		return a, a.push(newTagsScreen(a.ctx, a.deps, a.newID(), msg.repo))
+	case openDetailMsg:
+		return a, a.push(newDetailScreen(a.ctx, a.deps, a.newID(), msg.repo, msg.tag))
 	case backMsg:
 		// The bottom screen has nowhere to go back to; q quits.
 		if len(a.stack) == 1 {
@@ -128,9 +157,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return a, a.top().update(msg)
 }
 
+func (a *App) push(s screen) tea.Cmd {
+	a.top().suspend()
+	a.stack = append(a.stack, s)
+	return tea.Batch(s.update(a.size), s.init())
+}
+
 // View implements tea.Model.
 func (a *App) View() tea.View {
-	v := tea.NewView(a.top().view())
+	content := a.top().view()
+	if a.showHelp {
+		content = overlayHelp(content, a.top().title(), a.top().help(), a.size.Width, a.size.Height)
+	}
+	v := tea.NewView(content)
 	v.AltScreen = true
 	v.WindowTitle = "hubtui · " + a.top().title()
 	return v

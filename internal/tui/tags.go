@@ -8,14 +8,12 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 
 	"charm.land/bubbles/v2/table"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/davidhfrankelcodes/hubtui/internal/clip"
 	"github.com/davidhfrankelcodes/hubtui/internal/hub"
 )
 
@@ -34,14 +32,6 @@ func (s sortMode) String() string {
 	return [...]string{"pushed", "name", "size"}[s]
 }
 
-// clipboardMsg reports the native clipboard result for a yank.
-type clipboardMsg struct {
-	screen int
-	err    error
-}
-
-func (m clipboardMsg) target() int { return m.screen }
-
 // tagsPageMsg carries one fetched page back to Update. id ties it to the
 // request that produced it so late responses can be dropped.
 type tagsPageMsg struct {
@@ -56,13 +46,8 @@ func (m tagsPageMsg) target() int { return m.screen }
 
 // tagsScreen lists the tags of one repository.
 type tagsScreen struct {
-	sid    int
-	ctx    context.Context
-	reg    hub.Registry
-	clip   Copier
-	now    func() time.Time
-	styles styles
-	repo   hub.Repo
+	base
+	repo hub.Repo
 
 	// all holds every loaded tag in server order (newest first).
 	all      []hub.Tag
@@ -88,40 +73,49 @@ type tagsScreen struct {
 	visible []int
 	table   table.Model
 
-	width, height int
-	bar           statusBar
+	// arch is the platform filter, as Platform.String() ("linux/arm64/v8");
+	// empty shows every tag.
+	arch string
 }
 
 // newTagsScreen returns the Tags screen for repo. Requests derive from ctx.
 func newTagsScreen(ctx context.Context, deps Deps, id int, repo hub.Repo) *tagsScreen {
-	st := newStyles()
 	in := textinput.New()
 	in.Prompt = "/"
 	in.Placeholder = "regex"
 
-	t := table.New(table.WithFocused(true), table.WithStyles(st.table))
-
 	m := &tagsScreen{
-		sid:      id,
-		ctx:      ctx,
-		reg:      deps.Registry,
-		clip:     deps.Clipboard,
-		now:      deps.Now,
-		styles:   st,
+		base:     newBase(ctx, deps, id),
 		repo:     repo,
 		seen:     map[string]bool{},
 		nextPage: 1,
 		input:    in,
-		table:    t,
-		width:    80,
-		height:   24,
 	}
+	m.table = table.New(table.WithFocused(true), table.WithStyles(m.styles.table))
 	m.layout()
 	return m
 }
 
-func (m *tagsScreen) id() int       { return m.sid }
-func (m *tagsScreen) title() string { return m.repo.String() }
+func (m *tagsScreen) title() string      { return m.repo.String() }
+func (m *tagsScreen) capturesText() bool { return m.filtering }
+
+func (m *tagsScreen) help() []helpEntry {
+	return []helpEntry{
+		{"j/k ↑/↓", "move"},
+		{"g / G", "top / bottom"},
+		{"enter", "tag detail (platforms)"},
+		{"/", "filter tags by regex"},
+		{"a", "cycle architecture filter"},
+		{"s", "cycle sort: pushed, name, size"},
+		{"y", "yank image:tag"},
+		{"Y", "yank image:tag@sha256:… (multi-arch)"},
+		{"p", "yank docker pull image:tag"},
+		{"o", "open on hub.docker.com"},
+		{"r", "refresh, bypassing the cache"},
+		{"esc", "clear filter / back"},
+		{"q", "quit"},
+	}
+}
 
 func (m *tagsScreen) init() tea.Cmd {
 	return m.fetch(m.ctx, 1, false)
@@ -153,7 +147,7 @@ func (m *tagsScreen) fetch(parent context.Context, page int, fresh bool) tea.Cmd
 	m.cancel = cancel
 	m.loading = true
 
-	reg, repo, sid := m.reg, m.repo, m.sid
+	reg, repo, sid := m.deps.Registry, m.repo, m.sid
 	opts := hub.TagsOptions{PageOptions: hub.PageOptions{Page: page, PageSize: hub.MaxPageSize, Fresh: fresh}}
 	return func() tea.Msg {
 		res, err := reg.Tags(ctx, repo, opts)
@@ -162,6 +156,9 @@ func (m *tagsScreen) fetch(parent context.Context, page int, fresh bool) tea.Cmd
 }
 
 func (m *tagsScreen) update(msg tea.Msg) tea.Cmd {
+	if m.handleShared(msg) {
+		return nil
+	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -170,16 +167,6 @@ func (m *tagsScreen) update(msg tea.Msg) tea.Cmd {
 		return m.maybeLoadMore()
 	case tagsPageMsg:
 		return m.handlePage(msg)
-	case clearStatusMsg:
-		m.bar.expire(msg.id)
-		return nil
-	case clipboardMsg:
-		// OSC 52 was already sent, so a missing native tool is expected
-		// (SSH, headless); only a tool that ran and failed is worth showing.
-		if msg.err != nil && !errors.Is(msg.err, clip.ErrUnavailable) {
-			m.bar.set("native clipboard failed (OSC 52 was sent): "+msg.err.Error(), true)
-		}
-		return nil
 	case tea.KeyPressMsg:
 		if msg.String() == "ctrl+c" {
 			return m.quit()
@@ -265,6 +252,21 @@ func (m *tagsScreen) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.sort = (m.sort + 1) % numSortModes
 		m.rebuild()
 		return nil
+	case "a":
+		m.arch = nextArch(m.archOptions(), m.arch)
+		m.rebuild()
+		return m.maybeLoadMore()
+	case "enter":
+		if t, ok := m.selected(); ok {
+			return openDetail(m.repo, t)
+		}
+		return nil
+	case "o":
+		tag := ""
+		if t, ok := m.selected(); ok {
+			tag = t.Name
+		}
+		return m.openURL(hub.WebURL(m.repo, tag))
 	case "r":
 		m.stalled = false
 		m.bar.set("refreshing…", false)
@@ -278,36 +280,13 @@ func (m *tagsScreen) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	return tea.Batch(cmd, m.maybeLoadMore())
 }
 
-// yankText builds exactly what each yank key copies.
-func yankText(key string, repo hub.Repo, t hub.Tag) (string, error) {
-	switch key {
-	case "Y":
-		return hub.PinnedReference(repo, t)
-	case "p":
-		ref, err := hub.Reference(repo, t.Name)
-		if err != nil {
-			return "", err
-		}
-		return "docker pull " + ref, nil
-	}
-	return hub.Reference(repo, t.Name)
-}
-
 func (m *tagsScreen) yank(key string) tea.Cmd {
 	t, ok := m.selected()
 	if !ok {
 		m.bar.set("no tag selected", true)
 		return nil
 	}
-	text, err := yankText(key, m.repo, t)
-	if err != nil {
-		m.bar.set("not copied: "+err.Error(), true)
-		return nil
-	}
-
-	copier, ctx, sid := m.clip, m.ctx, m.sid
-	native := func() tea.Msg { return clipboardMsg{screen: sid, err: copier.Copy(ctx, text)} }
-	return tea.Batch(tea.SetClipboard(text), native, m.bar.flash(m.sid, "copied "+text))
+	return m.base.yank(key, m.repo, t)
 }
 
 func (m *tagsScreen) updateFilter(msg tea.KeyPressMsg) tea.Cmd {
@@ -359,7 +338,7 @@ func (m *tagsScreen) rebuild() {
 
 	m.visible = m.visible[:0]
 	for i, t := range m.all {
-		if m.filterRE == nil || m.filterRE.MatchString(t.Name) {
+		if (m.filterRE == nil || m.filterRE.MatchString(t.Name)) && (m.arch == "" || t.HasPlatform(m.arch)) {
 			m.visible = append(m.visible, i)
 		}
 	}
@@ -378,16 +357,16 @@ func (m *tagsScreen) rebuild() {
 			return 0
 		})
 	case sortSize:
-		slices.SortStableFunc(m.visible, func(a, b int) int { return cmp.Compare(displaySize(m.all[b]), displaySize(m.all[a])) })
+		slices.SortStableFunc(m.visible, func(a, b int) int { return cmp.Compare(displaySize(m.all[b], m.arch), displaySize(m.all[a], m.arch)) })
 	}
 
-	now := m.now()
+	now := m.deps.Now()
 	archW := m.table.Columns()[1].Width
 	rows := make([]table.Row, len(m.visible))
 	cursor := 0
 	for r, i := range m.visible {
 		t := m.all[i]
-		rows[r] = table.Row{t.Name, archSummary(t.Platforms, archW), humanSize(displaySize(t)), relativeTime(t.Pushed, now), shortDigest(t.Digest)}
+		rows[r] = table.Row{t.Name, archSummary(t.Platforms, archW), humanSize(displaySize(t, m.arch)), relativeTime(t.Pushed, now), shortDigest(t.Digest)}
 		if t.Name == selected {
 			cursor = r
 		}
@@ -472,10 +451,46 @@ func (m *tagsScreen) view() string {
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
+// archOptions lists the platforms seen in the loaded tags, common ones first.
+func (m *tagsScreen) archOptions() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, t := range m.all {
+		for _, p := range t.Platforms {
+			if s := p.String(); !seen[s] {
+				seen[s] = true
+				out = append(out, s)
+			}
+		}
+	}
+	slices.Sort(out)
+	sortPlatforms(out)
+	return out
+}
+
+// nextArch cycles all → each option → all. A filter that is no longer among
+// the options (it cannot happen today, but pages only add) restarts the cycle.
+func nextArch(options []string, current string) string {
+	if current == "" {
+		if len(options) == 0 {
+			return ""
+		}
+		return options[0]
+	}
+	i := slices.Index(options, current)
+	if i < 0 || i == len(options)-1 {
+		return ""
+	}
+	return options[i+1]
+}
+
 func (m *tagsScreen) statusLine() string {
 	var right []string
 	if m.filterRE != nil {
 		right = append(right, fmt.Sprintf("/%s/ %d match", m.filterRE, len(m.visible)))
+	}
+	if m.arch != "" {
+		right = append(right, "arch: "+shortPlatform(m.arch))
 	}
 	right = append(right, fmt.Sprintf("%d/%d loaded", len(m.all), m.total), "sort: "+m.sort.String())
 	return m.bar.render(m.styles, m.width, strings.Join(right, " · "), m.loading)

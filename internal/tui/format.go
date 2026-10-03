@@ -86,25 +86,13 @@ func archSummary(ps []hub.Platform, width int) string {
 	seen := map[string]bool{}
 	var names []string
 	for _, p := range ps {
-		s := strings.TrimPrefix(p.String(), "linux/")
+		s := shortPlatform(p.String())
 		if !seen[s] {
 			seen[s] = true
 			names = append(names, s)
 		}
 	}
-	slices.SortStableFunc(names, func(a, b string) int {
-		ra, okA := archRank(a)
-		rb, okB := archRank(b)
-		switch {
-		case okA && okB:
-			return ra - rb
-		case okA:
-			return -1
-		case okB:
-			return 1
-		}
-		return 0
-	})
+	sortPlatforms(names)
 
 	out := ""
 	for i, n := range names {
@@ -127,12 +115,40 @@ func archSummary(ps []hub.Platform, width int) string {
 	return out
 }
 
-// displaySize picks one platform's size to stand for the tag. amd64 is the
-// most common reference point; summing platforms would be meaningless since
-// nobody pulls them all.
-func displaySize(t hub.Tag) int64 {
+// shortPlatform drops the "linux/" that nearly every platform shares.
+func shortPlatform(s string) string { return strings.TrimPrefix(s, "linux/") }
+
+// sortPlatforms puts commonly wanted platforms first and keeps the relative
+// order of the rest. It accepts long or short forms.
+func sortPlatforms(names []string) {
+	slices.SortStableFunc(names, func(a, b string) int {
+		ra, okA := archRank(shortPlatform(a))
+		rb, okB := archRank(shortPlatform(b))
+		switch {
+		case okA && okB:
+			return ra - rb
+		case okA:
+			return -1
+		case okB:
+			return 1
+		}
+		return 0
+	})
+}
+
+// displaySize picks one platform's size to stand for the tag: the filtered
+// platform when there is one, otherwise amd64 as the common reference point.
+// Summing platforms would be meaningless since nobody pulls them all.
+func displaySize(t hub.Tag, platform string) int64 {
 	if len(t.Platforms) == 0 {
 		return 0
+	}
+	if platform != "" {
+		for _, p := range t.Platforms {
+			if p.Matches(platform) {
+				return p.Size
+			}
+		}
 	}
 	for _, p := range t.Platforms {
 		if p.Arch == "amd64" && (p.OS == "linux" || p.OS == "") {

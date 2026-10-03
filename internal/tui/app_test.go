@@ -18,7 +18,7 @@ func sendA(t *testing.T, a *App, msg tea.Msg) {
 		var next []tea.Cmd
 		for _, m := range runCmds(t, cmd) {
 			switch m.(type) {
-			case tagsPageMsg, searchResultMsg, openTagsMsg, backMsg:
+			case tagsPageMsg, searchResultMsg, openTagsMsg, openDetailMsg, backMsg:
 				_, c := a.Update(m)
 				next = append(next, c)
 			}

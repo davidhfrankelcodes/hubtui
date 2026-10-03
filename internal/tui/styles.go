@@ -14,6 +14,10 @@ type styles struct {
 	err    lipgloss.Style
 	notice lipgloss.Style
 	table  table.Styles
+	// The help box is opaque and bordered so it reads as a layer above the
+	// screen, not part of it.
+	helpBox lipgloss.Style
+	helpKey lipgloss.Style
 }
 
 func newStyles() styles {
@@ -27,5 +31,7 @@ func newStyles() styles {
 			Cell:     lipgloss.NewStyle().Padding(0, 1),
 			Selected: lipgloss.NewStyle().Reverse(true),
 		},
+		helpBox: lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Blue).Padding(0, 2),
+		helpKey: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Yellow),
 	}
 }

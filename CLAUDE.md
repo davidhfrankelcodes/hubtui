@@ -48,6 +48,7 @@ cmd/hubtui/        main.go: flag parsing, wiring only
 internal/hub/      Docker Hub API client and types. No TUI imports.
 internal/tui/      Bubble Tea models, one file per screen
 internal/clip/     Clipboard (OSC 52 first, native fallback)
+internal/browser/  Opening Docker Hub pages in the user's browser
 internal/config/   Env and flag resolution
 testdata/          Recorded API responses used by tests
 ```

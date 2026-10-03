@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"strings"
 
+	"github.com/davidhfrankelcodes/hubtui/internal/browser"
 	"github.com/davidhfrankelcodes/hubtui/internal/clip"
 	"github.com/davidhfrankelcodes/hubtui/internal/hub"
 	"github.com/davidhfrankelcodes/hubtui/internal/tui"
@@ -68,6 +69,7 @@ func mainCode() int {
 			return tui.Run(ctx, tui.Deps{
 				Registry:  hub.NewCache(client, hub.DefaultCacheTTL),
 				Clipboard: clip.NewNative(),
+				Browser:   browser.New(),
 			}, repo)
 		},
 	}

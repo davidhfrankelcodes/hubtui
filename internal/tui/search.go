@@ -41,10 +41,7 @@ func (m debounceMsg) target() int { return m.screen }
 
 // searchScreen is a query box above a table of matching repositories.
 type searchScreen struct {
-	sid    int
-	ctx    context.Context
-	reg    hub.Registry
-	styles styles
+	base
 
 	input        textinput.Model
 	inputFocused bool
@@ -63,34 +60,40 @@ type searchScreen struct {
 	loading bool
 	stalled bool
 
-	table         table.Model
-	width, height int
-	bar           statusBar
+	table table.Model
 }
 
 func newSearchScreen(ctx context.Context, deps Deps, id int) *searchScreen {
-	st := newStyles()
 	in := textinput.New()
 	in.Prompt = "search: "
 	in.Placeholder = "repository name, e.g. nginx or grafana"
 
 	s := &searchScreen{
-		sid:    id,
-		ctx:    ctx,
-		reg:    deps.Registry,
-		styles: st,
-		input:  in,
-		seen:   map[hub.Repo]bool{},
-		table:  table.New(table.WithStyles(st.table)),
-		width:  80,
-		height: 24,
+		base:  newBase(ctx, deps, id),
+		input: in,
+		seen:  map[hub.Repo]bool{},
 	}
+	s.table = table.New(table.WithStyles(s.styles.table))
 	s.layout()
 	return s
 }
 
-func (s *searchScreen) id() int       { return s.sid }
-func (s *searchScreen) title() string { return "search" }
+func (s *searchScreen) title() string      { return "search" }
+func (s *searchScreen) capturesText() bool { return s.inputFocused }
+
+func (s *searchScreen) help() []helpEntry {
+	return []helpEntry{
+		{"type", "search as you type"},
+		{"enter", "search now / open repository"},
+		{"↓ tab", "from the query to the results"},
+		{"/ esc", "back to the query"},
+		{"j/k ↑/↓", "move"},
+		{"g / G", "top / bottom"},
+		{"o", "open on hub.docker.com"},
+		{"r", "refresh, bypassing the cache"},
+		{"q ctrl+c", "quit (ctrl+c while typing)"},
+	}
+}
 
 func (s *searchScreen) init() tea.Cmd { return s.focusInput() }
 
@@ -123,6 +126,9 @@ func (s *searchScreen) focusTable() {
 }
 
 func (s *searchScreen) update(msg tea.Msg) tea.Cmd {
+	if s.handleShared(msg) {
+		return nil
+	}
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		s.width, s.height = msg.Width, msg.Height
@@ -136,9 +142,6 @@ func (s *searchScreen) update(msg tea.Msg) tea.Cmd {
 			return nil
 		}
 		return s.search(false)
-	case clearStatusMsg:
-		s.bar.expire(msg.id)
-		return nil
 	case tea.KeyPressMsg:
 		if s.inputFocused {
 			return s.updateInput(msg)
@@ -201,6 +204,11 @@ func (s *searchScreen) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "r":
 		s.stalled = false
 		return s.search(true)
+	case "o":
+		if r, ok := s.selected(); ok {
+			return s.openURL(hub.WebURL(r.Repo, ""))
+		}
+		return nil
 	}
 	var cmd tea.Cmd
 	s.table, cmd = s.table.Update(msg)
@@ -235,7 +243,7 @@ func (s *searchScreen) fetch(page int, fresh bool) tea.Cmd {
 	s.cancel = cancel
 	s.loading = true
 
-	reg, query, sid := s.reg, s.query, s.sid
+	reg, query, sid := s.deps.Registry, s.query, s.sid
 	opts := hub.PageOptions{Page: page, PageSize: searchPageSize, Fresh: fresh}
 	return func() tea.Msg {
 		res, err := reg.Search(ctx, query, opts)
