@@ -99,6 +99,7 @@ Verify each endpoint against the live API with `curl` before writing the client 
 | `s` | Cycle sort: pushed, name, size |
 | `a` | Cycle architecture filter |
 | `u` | Toggle hiding unstable tags (rc, beta, nightly, ...) |
+| `v` | Cycle version grouping: major, minor, off |
 | `y` | Yank `image:tag` |
 | `Y` | Yank `image:tag@sha256:...` |
 | `p` | Yank `docker pull image:tag` |

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/table"
@@ -78,6 +79,17 @@ type tagsScreen struct {
 	arch string
 	// stable hides prereleases, dev builds and commit builds.
 	stable bool
+
+	// grouping shows one row per version group instead of one per tag.
+	// openGroup is the group being browsed; empty shows the group list.
+	grouping  groupLevel
+	openGroup string
+	// lastGroup puts the cursor back on the group just left.
+	lastGroup string
+	groups    []tagGroup
+	// groupCols records which column set the table has, so rows are never
+	// set against the other set's columns.
+	groupCols bool
 }
 
 // newTagsScreen returns the Tags screen for repo. Requests derive from ctx.
@@ -105,10 +117,11 @@ func (m *tagsScreen) help() []helpEntry {
 	return []helpEntry{
 		{"j/k ↑/↓", "move"},
 		{"g / G", "top / bottom"},
-		{"enter", "tag detail (platforms)"},
+		{"enter", "tag detail (platforms) / open group"},
 		{"/", "filter tags by regex"},
 		{"a", "cycle architecture filter"},
 		{"u", "hide unstable tags (rc, beta, nightly, …)"},
+		{"v", "group by version: major, minor, off"},
 		{"s", "cycle sort: pushed, name, size"},
 		{"y", "yank image:tag"},
 		{"Y", "yank image:tag@sha256:… (multi-arch)"},
@@ -241,10 +254,16 @@ func (m *tagsScreen) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.layout()
 		return m.input.Focus()
 	case "esc":
-		// Esc undoes the filter first, then leaves the screen.
+		// Esc undoes the filter first, then closes an open group, then
+		// leaves the screen.
 		if m.filterRE != nil || m.input.Value() != "" {
 			m.clearFilter()
 			return nil
+		}
+		if m.openGroup != "" {
+			m.openGroup = ""
+			m.rebuild()
+			return m.maybeLoadMore()
 		}
 		return back
 	case "s":
@@ -259,7 +278,25 @@ func (m *tagsScreen) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.stable = !m.stable
 		m.rebuild()
 		return m.maybeLoadMore()
+	case "v":
+		// A group key means something different at another level ("1" holds
+		// the floating 1-alpine tags at the minor level), so the selection
+		// does not carry over; the selected tag's group does.
+		tag := m.selectedName()
+		m.grouping = (m.grouping + 1) % numGroupLevels
+		m.openGroup, m.lastGroup, m.groups = "", "", nil
+		if tag != "" {
+			m.lastGroup = groupKey(tag, m.grouping)
+		}
+		m.rebuild()
+		return m.maybeLoadMore()
 	case "enter":
+		if g, ok := m.selectedGroup(); ok {
+			m.openGroup, m.lastGroup = g.key, g.key
+			m.table.SetCursor(0)
+			m.rebuild()
+			return m.maybeLoadMore()
+		}
 		if t, ok := m.selected(); ok {
 			return openDetail(m.repo, t, m.aliasInfo(t))
 		}
@@ -285,7 +322,11 @@ func (m *tagsScreen) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 
 func (m *tagsScreen) yank(key string) tea.Cmd {
 	t, ok := m.selected()
-	if !ok {
+	switch {
+	case !ok && m.showingGroups():
+		m.bar.set("open a group to yank one of its tags", true)
+		return nil
+	case !ok:
 		m.bar.set("no tag selected", true)
 		return nil
 	}
@@ -335,16 +376,31 @@ func (m *tagsScreen) clearFilter() {
 	m.rebuild()
 }
 
-// rebuild recomputes the visible rows, keeping the same tag selected.
+// rebuild recomputes the visible rows, keeping the same tag or group
+// selected.
 func (m *tagsScreen) rebuild() {
-	selected := m.selectedName()
+	selected, selectedGroup := m.selectedName(), m.lastGroup
+	if g, ok := m.selectedGroup(); ok {
+		selectedGroup = g.key
+	}
 
 	m.visible = m.visible[:0]
 	for i, t := range m.all {
-		if (m.filterRE == nil || m.filterRE.MatchString(t.Name)) && (m.arch == "" || t.HasPlatform(m.arch)) && (!m.stable || !hub.IsPrerelease(t.Name)) {
+		if (m.filterRE == nil || m.filterRE.MatchString(t.Name)) && (m.arch == "" || t.HasPlatform(m.arch)) && (!m.stable || !hub.IsPrerelease(t.Name)) &&
+			(m.openGroup == "" || groupKey(t.Name, m.grouping) == m.openGroup) {
 			m.visible = append(m.visible, i)
 		}
 	}
+
+	if m.showingGroups() {
+		m.groups = buildGroups(m.all, m.visible, m.grouping)
+		m.setColumns(true)
+		m.setGroupRows(selectedGroup)
+		return
+	}
+	m.groups = nil
+	m.setColumns(false)
+
 	switch m.sort {
 	case sortPushed:
 		slices.SortStableFunc(m.visible, func(a, b int) int { return m.all[b].Pushed.Compare(m.all[a].Pushed) })
@@ -374,11 +430,52 @@ func (m *tagsScreen) rebuild() {
 			cursor = r
 		}
 	}
+	m.setRows(rows, cursor)
+}
+
+// setGroupRows shows one row per group, newest version first; sorting by
+// push date or size would scatter versions, which defeats grouping.
+func (m *tagsScreen) setGroupRows(selected string) {
+	now := m.deps.Now()
+	rows := make([]table.Row, len(m.groups))
+	cursor := 0
+	for r, g := range m.groups {
+		rows[r] = table.Row{g.key, strconv.Itoa(len(g.tags)), m.all[g.newest].Name, relativeTime(g.pushed, now)}
+		if g.key == selected {
+			cursor = r
+		}
+	}
+	m.setRows(rows, cursor)
+}
+
+func (m *tagsScreen) setRows(rows []table.Row, cursor int) {
 	m.table.SetRows(rows)
 	// The table leaves its cursor at -1 after being emptied.
 	if len(rows) > 0 {
 		m.table.SetCursor(cursor)
 	}
+}
+
+// showingGroups reports whether the table lists groups rather than tags.
+func (m *tagsScreen) showingGroups() bool {
+	return m.grouping != groupOff && m.openGroup == ""
+}
+
+// selectedGroup returns the group under the cursor in the group list.
+func (m *tagsScreen) selectedGroup() (tagGroup, bool) {
+	c := m.table.Cursor()
+	if !m.groupCols || c < 0 || c >= len(m.groups) {
+		return tagGroup{}, false
+	}
+	return m.groups[c], true
+}
+
+// rowCount is the number of rows in the table, groups or tags.
+func (m *tagsScreen) rowCount() int {
+	if m.groupCols {
+		return len(m.groups)
+	}
+	return len(m.visible)
 }
 
 func (m *tagsScreen) selectedName() string {
@@ -388,10 +485,10 @@ func (m *tagsScreen) selectedName() string {
 	return ""
 }
 
-// selected returns the tag under the cursor.
+// selected returns the tag under the cursor; none while groups are listed.
 func (m *tagsScreen) selected() (hub.Tag, bool) {
 	c := m.table.Cursor()
-	if c < 0 || c >= len(m.visible) {
+	if m.groupCols || c < 0 || c >= len(m.visible) {
 		return hub.Tag{}, false
 	}
 	return m.all[m.visible[c]], true
@@ -424,7 +521,7 @@ func (m *tagsScreen) maybeLoadMore() tea.Cmd {
 	if !m.hasNext || m.loading || m.stalled {
 		return nil
 	}
-	if len(m.visible)-m.table.Cursor() > m.table.Height() {
+	if m.rowCount()-m.table.Cursor() > m.table.Height() {
 		return nil
 	}
 	return m.fetch(m.ctx, m.nextPage, false)
@@ -440,6 +537,29 @@ func (m *tagsScreen) layout() {
 	m.table.SetWidth(m.width)
 	// Leave room after the input for the invalid-regex message.
 	m.input.SetWidth(max(m.width-len(m.input.Prompt)-len(invalidRegex)-3, 1))
+
+	m.setColumns(m.groupCols)
+}
+
+// setColumns gives the table the group or the tag columns, sized to the
+// width. Rows are cleared first when the set changes: the table indexes row
+// cells by column, so old rows against new columns would not line up.
+func (m *tagsScreen) setColumns(groups bool) {
+	if groups != m.groupCols {
+		m.table.SetRows(nil)
+		m.groupCols = groups
+	}
+	if groups {
+		const groupW, countW, pushedW = 12, 6, 8
+		newestW := max(m.width-4*2-groupW-countW-pushedW, 10)
+		m.table.SetColumns([]table.Column{
+			{Title: "VERSION", Width: groupW},
+			{Title: "TAGS", Width: countW},
+			{Title: "NEWEST TAG", Width: newestW},
+			{Title: "PUSHED", Width: pushedW},
+		})
+		return
+	}
 
 	// Each cell has one column of padding on both sides. Narrow terminals
 	// lose the digest first; it is the least useful column for picking a tag.
@@ -460,7 +580,14 @@ func (m *tagsScreen) layout() {
 }
 
 func (m *tagsScreen) view() string {
-	title := m.styles.title.Render(m.repo.String()) + m.styles.dim.Render(" · tags")
+	sub := " · tags"
+	switch {
+	case m.openGroup != "":
+		sub += " · " + m.openGroup
+	case m.grouping != groupOff:
+		sub += " by " + m.grouping.String() + " version"
+	}
+	title := m.styles.title.Render(m.repo.String()) + m.styles.dim.Render(sub)
 
 	parts := []string{title, m.table.View()}
 	if m.filtering {
@@ -518,6 +645,12 @@ func (m *tagsScreen) statusLine() string {
 	if m.stable {
 		right = append(right, "stable")
 	}
-	right = append(right, fmt.Sprintf("%d/%d loaded", len(m.all), m.total), "sort: "+m.sort.String())
+	right = append(right, fmt.Sprintf("%d/%d loaded", len(m.all), m.total))
+	if m.showingGroups() {
+		// Counts grow as pages load; the loaded figure says how far along.
+		right = append(right, fmt.Sprintf("%d groups", len(m.groups)))
+	} else {
+		right = append(right, "sort: "+m.sort.String())
+	}
 	return m.base.statusLine(strings.Join(right, " · "), m.loading)
 }

@@ -40,12 +40,13 @@ hubtui grafana/grafana    # any namespace works; docker.io/ prefixes are accepte
 | --- | --- |
 | `j`/`k`, arrows | Move |
 | `g` / `G` | Top / bottom |
-| `enter` | Open: a repository's tags, or a tag's platforms |
-| `esc` | Back (on the Tags screen, clears a regex filter first) |
+| `enter` | Open: a repository's tags, a version group, or a tag's platforms |
+| `esc` | Back (on the Tags screen, clears a regex filter, then closes a version group) |
 | `/` | Filter tags by regex; on the Search screen, edit the query |
 | `s` | Cycle sort: pushed, name, size |
 | `a` | Cycle architecture filter |
 | `u` | Hide unstable tags: rc, beta, nightly, dev and commit builds |
+| `v` | Group tags by version: major, then minor, then off |
 | `y` | Yank `image:tag` |
 | `Y` | Yank `image:tag@sha256:...` |
 | `p` | Yank `docker pull image:tag` |
@@ -59,6 +60,8 @@ Name sorting understands versions, so `17.9` comes before `17.10`. The size show
 The tag detail screen lists the tag's **aliases**: other tags with the same index digest, so you can see that `latest` is currently `1.31`, `mainline` and `trixie`. Only loaded tags are searched. When Docker Hub has more tags than were loaded, the line says how many it looked through.
 
 `u` judges tags by name alone. It hides whole words such as `rc`, `alpha`, `beta`, `nightly`, `dev`, `tip`, `edge` and Debian's `sid`, `unstable`, `testing` and `experimental`, pre-release suffixes like `3.15.0b4` and `8.8-m03`, and commit-hash tags. Date-stamped tags stay, since distributions use them for stable snapshots. It cannot recognize a development codename such as Ubuntu's next release.
+
+`v` collapses a long tag list into one row per version, `17` or `1.31`, with how many tags each has and which was pushed most recently. Pick the level that fits the image: Postgres and Node release by major, nginx and Python by minor. Tags without a version (`latest`, `alpine`, codenames, date stamps) are grouped under `other`. `enter` opens a group as an ordinary tag list, and the other filters apply before grouping, so `u` then `v` shows only stable versions. Since groups are few, the list keeps loading pages until it fills the screen, which usually means every tag: about ten requests for a large image.
 
 ### Yanking
 
