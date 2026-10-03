@@ -12,16 +12,26 @@ import (
 	"github.com/davidhfrankelcodes/hubtui/internal/hub"
 )
 
-// detailScreen shows one tag: its digest and one row per platform.
-type detailScreen struct {
-	base
-	repo  hub.Repo
-	tag   hub.Tag
-	table table.Model
+// aliasInfo is the other tags that point at the same image as one tag.
+type aliasInfo struct {
+	names []string
+	// loaded is how many tags were searched; partial means more exist that
+	// were not loaded, so an alias could be missing.
+	loaded  int
+	partial bool
 }
 
-func newDetailScreen(ctx context.Context, deps Deps, id int, repo hub.Repo, t hub.Tag) *detailScreen {
-	d := &detailScreen{base: newBase(ctx, deps, id), repo: repo, tag: t}
+// detailScreen shows one tag: its digest, aliases and one row per platform.
+type detailScreen struct {
+	base
+	repo    hub.Repo
+	tag     hub.Tag
+	aliases aliasInfo
+	table   table.Model
+}
+
+func newDetailScreen(ctx context.Context, deps Deps, id int, repo hub.Repo, t hub.Tag, aliases aliasInfo) *detailScreen {
+	d := &detailScreen{base: newBase(ctx, deps, id), repo: repo, tag: t, aliases: aliases}
 	d.table = table.New(table.WithFocused(true), table.WithStyles(d.styles.table))
 	d.layout()
 	return d
@@ -88,12 +98,39 @@ func (d *detailScreen) infoLines() []string {
 		label("digest") + " " + elideMiddle(digest, w),
 		label("type") + " " + truncate(describeMediaType(d.tag.MediaType), w),
 		label("pushed") + " " + truncate(pushed, w),
+		label("aliases") + " " + d.aliasLine(w),
 	}
 }
 
+// aliasLine lists as many aliases as fit in w and counts the rest, so the
+// header stays one line however many tags share the image.
+func (d *detailScreen) aliasLine(w int) string {
+	var suffix string
+	if d.aliases.partial {
+		suffix = fmt.Sprintf(" (in %d loaded tags)", d.aliases.loaded)
+	}
+	names := d.aliases.names
+	switch {
+	case d.tag.Digest == "":
+		return truncate("unknown: no digest", w)
+	case len(names) == 0:
+		return truncate("none"+suffix, w)
+	}
+	for n := len(names); n > 0; n-- {
+		line := strings.Join(names[:n], ", ")
+		if n < len(names) {
+			line += fmt.Sprintf(" +%d more", len(names)-n)
+		}
+		if lipgloss.Width(line+suffix) <= w {
+			return line + suffix
+		}
+	}
+	return truncate(fmt.Sprintf("%d others%s", len(names), suffix), w)
+}
+
 func (d *detailScreen) layout() {
-	// Title, three info lines, a blank line and the status bar.
-	d.table.SetHeight(max(d.height-6, 2))
+	// Title, four info lines, a blank line and the status bar.
+	d.table.SetHeight(max(d.height-7, 2))
 	d.table.SetWidth(d.width)
 
 	const platformW, sizeW = 18, 9
@@ -121,7 +158,8 @@ func (d *detailScreen) view() string {
 	parts = append(parts, "")
 	if len(d.tag.Platforms) == 0 {
 		parts = append(parts, d.styles.dim.Render("Docker Hub reports no platform details for this tag."))
-		parts = append(parts, strings.Repeat("\n", max(d.height-7, 0)))
+		// n newlines make n+1 lines once joined: pad to just above the status bar.
+		parts = append(parts, strings.Repeat("\n", max(d.height-9, 0)))
 	} else {
 		parts = append(parts, d.table.View())
 	}

@@ -55,6 +55,8 @@ hubtui grafana/grafana    # any namespace works; docker.io/ prefixes are accepte
 
 Name sorting understands versions, so `17.9` comes before `17.10`. The size shown for a tag is the linux/amd64 image, or the filtered architecture's when `a` is active. Sorting and filtering apply to the tags loaded so far; more load as you scroll, and a filter keeps loading until it has enough matches to fill the screen.
 
+The tag detail screen lists the tag's **aliases**: other tags with the same index digest, so you can see that `latest` is currently `1.31`, `mainline` and `trixie`. Only loaded tags are searched. When Docker Hub has more tags than were loaded, the line says how many it looked through.
+
 ### Yanking
 
 `Y` copies the tag's **index digest**, the one that covers every platform, so the reference pulls the right image on any architecture. The status bar shows exactly what was copied. hubtui refuses to pin a tag when Docker Hub reports no digest for it, or when the tag is a legacy schema-1 manifest that current Docker cannot pull; `y` and `p` still work for those.
@@ -80,6 +82,10 @@ hubtui search redis --json | jq -r '.[] | select(.official) | .name'
 # Tags come in push order, which is not version order.
 hubtui tags postgres --json --arch arm64 --limit 200 \
   | jq -r '[.[] | select(.name | test("^[0-9]+\\.[0-9]+-alpine$"))][0].pinned_reference'
+
+# Every tag that is currently the same image as latest
+hubtui tags nginx --json --limit 0 \
+  | jq -r '(map(select(.name == "latest"))[0].digest) as $d | [.[] | select(.digest == $d) | .name] | join(" ")'
 
 # Tag names with their platform counts
 hubtui tags nginx --json --limit 5 | jq -r '.[] | [.name, (.platforms | length)] | @tsv'

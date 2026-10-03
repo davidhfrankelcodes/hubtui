@@ -60,8 +60,9 @@ type openTagsMsg struct{ repo hub.Repo }
 
 // openDetailMsg asks the App to push the detail screen for one tag.
 type openDetailMsg struct {
-	repo hub.Repo
-	tag  hub.Tag
+	repo    hub.Repo
+	tag     hub.Tag
+	aliases aliasInfo
 }
 
 // backMsg asks the App to pop the top screen.
@@ -69,8 +70,8 @@ type backMsg struct{}
 
 func openTags(repo hub.Repo) tea.Cmd { return func() tea.Msg { return openTagsMsg{repo: repo} } }
 
-func openDetail(repo hub.Repo, t hub.Tag) tea.Cmd {
-	return func() tea.Msg { return openDetailMsg{repo: repo, tag: t} }
+func openDetail(repo hub.Repo, t hub.Tag, aliases aliasInfo) tea.Cmd {
+	return func() tea.Msg { return openDetailMsg{repo: repo, tag: t, aliases: aliases} }
 }
 
 func back() tea.Msg { return backMsg{} }
@@ -140,7 +141,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case openTagsMsg:
 		return a, a.push(newTagsScreen(a.ctx, a.deps, a.newID(), msg.repo))
 	case openDetailMsg:
-		return a, a.push(newDetailScreen(a.ctx, a.deps, a.newID(), msg.repo, msg.tag))
+		return a, a.push(newDetailScreen(a.ctx, a.deps, a.newID(), msg.repo, msg.tag, msg.aliases))
 	case backMsg:
 		// The bottom screen has nowhere to go back to; q quits.
 		if len(a.stack) == 1 {

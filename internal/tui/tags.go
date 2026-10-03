@@ -254,7 +254,7 @@ func (m *tagsScreen) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.maybeLoadMore()
 	case "enter":
 		if t, ok := m.selected(); ok {
-			return openDetail(m.repo, t)
+			return openDetail(m.repo, t, m.aliasInfo(t))
 		}
 		return nil
 	case "o":
@@ -388,6 +388,26 @@ func (m *tagsScreen) selected() (hub.Tag, bool) {
 		return hub.Tag{}, false
 	}
 	return m.all[m.visible[c]], true
+}
+
+// aliasInfo finds t's aliases among the loaded tags. Aliases are usually
+// pushed together, so they sit next to each other in newest-first order and
+// are rarely split across pages, but the detail screen still says when the
+// list may be incomplete.
+func (m *tagsScreen) aliasInfo(t hub.Tag) aliasInfo {
+	names := hub.Aliases(m.all, t)
+	slices.SortFunc(names, func(a, b string) int {
+		switch {
+		case naturalLess(a, b):
+			return -1
+		case naturalLess(b, a):
+			return 1
+		}
+		return 0
+	})
+	// The anonymous paging cap ends loading with hasNext false, so compare
+	// against the total too.
+	return aliasInfo{names: names, loaded: len(m.all), partial: m.hasNext || len(m.all) < m.total}
 }
 
 // maybeLoadMore fetches the next page once the cursor is within a screenful

@@ -118,3 +118,19 @@ func (t Tag) HasPlatform(spec string) bool {
 	}
 	return false
 }
+
+// Aliases returns the names of the other tags in tags that point at the same
+// digest as t, in the order given. Tags without a digest have no aliases:
+// an empty digest says nothing about which image a tag is.
+func Aliases(tags []Tag, t Tag) []string {
+	if t.Digest == "" {
+		return nil
+	}
+	var out []string
+	for _, o := range tags {
+		if o.Digest == t.Digest && o.Name != t.Name {
+			out = append(out, o.Name)
+		}
+	}
+	return out
+}

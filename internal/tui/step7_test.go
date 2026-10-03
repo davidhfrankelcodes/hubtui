@@ -187,7 +187,11 @@ func TestSearchOpenInBrowser(t *testing.T) {
 }
 
 func newTestDetail(cb *fakeClipboard, repo hub.Repo, tag hub.Tag) *detailScreen {
-	d := newDetailScreen(context.Background(), Deps{Registry: &fakeRegistry{}, Clipboard: cb, Browser: &fakeOpener{}, Now: testNow}, 7, repo, tag)
+	return newTestDetailAliases(cb, repo, tag, aliasInfo{})
+}
+
+func newTestDetailAliases(cb *fakeClipboard, repo hub.Repo, tag hub.Tag, aliases aliasInfo) *detailScreen {
+	d := newDetailScreen(context.Background(), Deps{Registry: &fakeRegistry{}, Clipboard: cb, Browser: &fakeOpener{}, Now: testNow}, 7, repo, tag, aliases)
 	d.update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	return d
 }
