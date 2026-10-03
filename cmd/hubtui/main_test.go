@@ -402,6 +402,18 @@ func TestTagsEndToEnd(t *testing.T) {
 	}
 }
 
+// The usage text is the only help a piped invocation gets; keep every form
+// in one block, ahead of the prose and the flag list.
+func TestUsageListsEveryForm(t *testing.T) {
+	_, _, stderr := runApp(t, &fakeRegistry{}, "-h")
+	block, _, _ := strings.Cut(stderr, "\n\n")
+	for _, form := range []string{"hubtui search <query> --json", "hubtui tags <image> --json", "hubtui <image>", "hubtui --version"} {
+		if !strings.Contains(block, form) {
+			t.Errorf("usage block lacks %q:\n%s", form, block)
+		}
+	}
+}
+
 func TestResolveVersion(t *testing.T) {
 	if got := resolveVersion("v1.2.3"); got != "v1.2.3" {
 		t.Errorf("resolveVersion(injected) = %q, want %q", got, "v1.2.3")

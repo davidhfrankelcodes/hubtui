@@ -25,12 +25,13 @@ var version = "" //nolint:gochecknoglobals // the linker can only inject into pa
 const usage = `Usage:
   hubtui                          search Docker Hub interactively
   hubtui <image>                  browse an image's tags interactively
+  hubtui search <query> --json
+  hubtui tags <image> --json [--arch <arch>] [--limit <n>]
   hubtui --version
 
 Set DOCKERHUB_USERNAME and DOCKERHUB_TOKEN (a personal access token) to
 make authenticated requests; anonymous access is the default.
-  hubtui search <query> --json
-  hubtui tags <image> --json [--arch <arch>] [--limit <n>]
+
 `
 
 const (
