@@ -66,7 +66,11 @@ testdata/          Recorded API responses used by tests
 Verify each endpoint against the live API with `curl` before writing the client for it. Record the response into `testdata/` and build the types from what actually comes back, not from memory.
 
 - Search: `GET https://hub.docker.com/v2/search/repositories/?query=<q>&page_size=<n>`
-- Tags: `GET https://hub.docker.com/v2/namespaces/<ns>/repositories/<repo>/tags?page_size=<n>&ordering=-last_updated`
+- Tags: `GET https://hub.docker.com/v2/namespaces/<ns>/repositories/<repo>/tags?page_size=<n>&ordering=last_updated`
+  - `ordering` is inverted from what the names suggest: `last_updated` is newest first, `-last_updated` oldest first; `-name` is ascending. Verified live 2026-10-02.
+- `page_size` is silently capped at 100 on both endpoints.
+- Anonymous paging is capped: tags stop after the first 1000, search after the first 200. Past that Hub returns 403 with a "pagination ... too large" message (and `next` still points past it).
+- Some legacy (schema v1) tags have `digest: null`. Indexes also list attestation manifests as `unknown/unknown` platforms; they are not runnable and must be hidden.
 - Official images live in the `library` namespace. Accept `nginx` and normalize to `library/nginx` for requests; display it as `nginx`.
 - A tag has a top-level digest (the multi-arch index) and a per-platform list of images, each with its own digest and size. Confirm which is which against `docker buildx imagetools inspect <image>:<tag>` before relying on it. The yanked digest must be the index digest, so the reference works on any architecture.
 - Anonymous access is the default. If `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are both set, authenticate with them. Never log, print, or write the token anywhere.
