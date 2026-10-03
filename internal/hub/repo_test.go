@@ -72,3 +72,36 @@ func TestPlatformString(t *testing.T) {
 		}
 	}
 }
+
+func TestPlatformMatches(t *testing.T) {
+	armV7 := Platform{OS: "linux", Arch: "arm", Variant: "v7"}
+	arm64 := Platform{OS: "linux", Arch: "arm64", Variant: "v8"}
+	amd64 := Platform{OS: "linux", Arch: "amd64"}
+	legacy := Platform{Arch: "amd64"}
+	tests := []struct {
+		p    Platform
+		spec string
+		want bool
+	}{
+		{amd64, "amd64", true},
+		{amd64, "linux/amd64", true},
+		{amd64, "windows/amd64", false},
+		{amd64, "arm64", false},
+		{amd64, "", false},
+		{arm64, "arm64", true},
+		{arm64, "linux/arm64", true},
+		{arm64, "arm64/v8", true},
+		{arm64, "linux/arm64/v8", true},
+		{armV7, "arm", true},
+		{armV7, "arm/v7", true},
+		{armV7, "arm/v6", false},
+		{armV7, "linux/arm/v7", true},
+		{legacy, "amd64", true},
+		{legacy, "linux/amd64", false},
+	}
+	for _, tt := range tests {
+		if got := tt.p.Matches(tt.spec); got != tt.want {
+			t.Errorf("%s.Matches(%q) = %v, want %v", tt.p, tt.spec, got, tt.want)
+		}
+	}
+}

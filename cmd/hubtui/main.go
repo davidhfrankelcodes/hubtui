@@ -2,44 +2,172 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"runtime/debug"
+	"strings"
+
+	"github.com/davidhfrankelcodes/hubtui/internal/hub"
 )
 
 // version is set at build time via -ldflags "-X main.version=...".
 var version = "" //nolint:gochecknoglobals // the linker can only inject into package-level vars
 
-func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+const usage = `Usage:
+  hubtui [--version]
+  hubtui search <query> --json
+  hubtui tags <image> --json [--arch <arch>] [--limit <n>]
+`
+
+const (
+	exitOK    = 0
+	exitError = 1
+	exitUsage = 2
+)
+
+// app holds what commands need, so tests can swap the registry and streams.
+type app struct {
+	stdout, stderr io.Writer
+	registry       hub.Registry
 }
 
-func run(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("hubtui", flag.ContinueOnError)
-	fs.SetOutput(stderr)
+func main() {
+	os.Exit(mainCode())
+}
+
+// mainCode exists so deferred cleanup runs before os.Exit.
+func mainCode() int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	client, err := hub.NewClient(hub.Options{UserAgent: "hubtui/" + resolveVersion(version)})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "hubtui: %v\n", err)
+		return exitError
+	}
+	a := &app{stdout: os.Stdout, stderr: os.Stderr, registry: client}
+	return a.run(ctx, os.Args[1:])
+}
+
+func (a *app) run(ctx context.Context, args []string) int {
+	if len(args) > 0 {
+		switch args[0] {
+		case "search":
+			return a.runSearch(ctx, args[1:])
+		case "tags":
+			return a.runTags(ctx, args[1:])
+		}
+	}
+
+	fs := a.flagSet("hubtui", usage)
 	showVersion := fs.Bool("version", false, "print version and exit")
+	if code, ok := a.parse(fs, args, nil); !ok {
+		return code
+	}
+	if *showVersion {
+		_, _ = fmt.Fprintf(a.stdout, "hubtui %s\n", resolveVersion(version))
+		return exitOK
+	}
+
+	// The TUI arrives in a later step; until then there is nothing to run.
+	fs.Usage()
+	return exitUsage
+}
+
+func (a *app) runSearch(ctx context.Context, args []string) int {
+	fs := a.flagSet("search", "Usage: hubtui search <query> --json\n")
+	asJSON := fs.Bool("json", false, "print results as JSON (required)")
+	var pos []string
+	if code, ok := a.parse(fs, args, &pos); !ok {
+		return code
+	}
+	if len(pos) == 0 {
+		return a.usageError(fs, "search: missing query")
+	}
+	if !*asJSON {
+		return a.usageError(fs, "search: --json is required")
+	}
+	return a.searchJSON(ctx, strings.Join(pos, " "))
+}
+
+func (a *app) runTags(ctx context.Context, args []string) int {
+	fs := a.flagSet("tags", "Usage: hubtui tags <image> --json [--arch <arch>] [--limit <n>]\n")
+	asJSON := fs.Bool("json", false, "print tags as JSON (required)")
+	arch := fs.String("arch", "", "only tags with this platform: arm64, linux/arm64, arm/v7, ...")
+	limit := fs.Int("limit", 100, "maximum number of tags; 0 for all that Docker Hub will return")
+	var pos []string
+	if code, ok := a.parse(fs, args, &pos); !ok {
+		return code
+	}
+	if len(pos) != 1 {
+		return a.usageError(fs, "tags: expected exactly one image")
+	}
+	if !*asJSON {
+		return a.usageError(fs, "tags: --json is required")
+	}
+	if *limit < 0 {
+		return a.usageError(fs, "tags: --limit must not be negative")
+	}
+	repo, err := hub.ParseRepo(pos[0])
+	if err != nil {
+		return a.usageError(fs, "tags: "+err.Error())
+	}
+	return a.tagsJSON(ctx, repo, strings.ToLower(strings.TrimSpace(*arch)), *limit)
+}
+
+func (a *app) flagSet(name, synopsis string) *flag.FlagSet {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(a.stderr)
 	fs.Usage = func() {
-		_, _ = fmt.Fprintln(fs.Output(), "Usage: hubtui [flags]")
+		_, _ = fmt.Fprint(fs.Output(), synopsis)
 		fs.PrintDefaults()
 	}
+	return fs
+}
 
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
+// parse parses flags anywhere among the arguments, since `hubtui tags nginx
+// --json` is how people type it and the flag package stops at the first
+// positional. Positionals go to pos; a nil pos means none are allowed.
+func (a *app) parse(fs *flag.FlagSet, args []string, pos *[]string) (code int, ok bool) {
+	var positional []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			if errors.Is(err, flag.ErrHelp) {
+				return exitOK, false
+			}
+			return exitUsage, false
 		}
-		return 2
+		rest := fs.Args()
+		if len(rest) == 0 {
+			break
+		}
+		// After "--" everything is positional, even if it looks like a flag.
+		if consumed := len(args) - len(rest); consumed > 0 && args[consumed-1] == "--" {
+			positional = append(positional, rest...)
+			break
+		}
+		positional = append(positional, rest[0])
+		args = rest[1:]
 	}
 
-	if *showVersion {
-		_, _ = fmt.Fprintf(stdout, "hubtui %s\n", resolveVersion(version))
-		return 0
+	if pos == nil && len(positional) > 0 {
+		return a.usageError(fs, fmt.Sprintf("unexpected argument %q", positional[0])), false
 	}
+	if pos != nil {
+		*pos = positional
+	}
+	return exitOK, true
+}
 
+func (a *app) usageError(fs *flag.FlagSet, msg string) int {
+	_, _ = fmt.Fprintf(a.stderr, "hubtui: %s\n", msg)
 	fs.Usage()
-	return 2
+	return exitUsage
 }
 
 // resolveVersion falls back to module build info so `go install ...@vX`

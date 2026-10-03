@@ -96,3 +96,25 @@ type tagsResponse struct {
 		} `json:"images"`
 	} `json:"results"`
 }
+
+// Matches reports whether p fits spec, which may be "arch", "os/arch",
+// "arch/variant" or "os/arch/variant" (e.g. "arm64", "linux/arm64", "arm/v7").
+func (p Platform) Matches(spec string) bool {
+	switch spec {
+	case "":
+		return false
+	case p.Arch, p.OS + "/" + p.Arch:
+		return true
+	}
+	return p.Variant != "" && (spec == p.Arch+"/"+p.Variant || spec == p.OS+"/"+p.Arch+"/"+p.Variant)
+}
+
+// HasPlatform reports whether any of t's platforms matches spec.
+func (t Tag) HasPlatform(spec string) bool {
+	for _, p := range t.Platforms {
+		if p.Matches(spec) {
+			return true
+		}
+	}
+	return false
+}
