@@ -175,3 +175,22 @@ func leadingDigits(s string) (digits, rest string) {
 	}
 	return s[:i], s[i:]
 }
+
+// compactNumber formats counts the way Docker Hub does: 1.2k, 13.4M, 2.1B.
+func compactNumber(n int64) string {
+	switch {
+	case n < 1000:
+		return fmt.Sprintf("%d", n)
+	case n < 1_000_000:
+		return trimZero(float64(n)/1e3) + "k"
+	case n < 1_000_000_000:
+		return trimZero(float64(n)/1e6) + "M"
+	default:
+		return trimZero(float64(n)/1e9) + "B"
+	}
+}
+
+// trimZero drops a trailing ".0" so round numbers read as "2k", not "2.0k".
+func trimZero(f float64) string {
+	return strings.TrimSuffix(fmt.Sprintf("%.1f", f), ".0")
+}

@@ -21,8 +21,9 @@ import (
 var version = "" //nolint:gochecknoglobals // the linker can only inject into package-level vars
 
 const usage = `Usage:
-  hubtui [--version]
-  hubtui <image>                  browse tags interactively
+  hubtui                          search Docker Hub interactively
+  hubtui <image>                  browse an image's tags interactively
+  hubtui --version
   hubtui search <query> --json
   hubtui tags <image> --json [--arch <arch>] [--limit <n>]
 `
@@ -40,7 +41,8 @@ type app struct {
 	registry       hub.Registry
 	// stdoutIsTTY gates the TUI: piped output gets usage, not escape codes.
 	stdoutIsTTY bool
-	openTagsTUI func(context.Context, hub.Repo) error
+	// openTUI starts on the Tags screen for repo, or on Search when nil.
+	openTUI func(context.Context, *hub.Repo) error
 }
 
 func main() {
@@ -62,8 +64,8 @@ func mainCode() int {
 		stderr:      os.Stderr,
 		registry:    client,
 		stdoutIsTTY: isTerminal(os.Stdout),
-		openTagsTUI: func(ctx context.Context, repo hub.Repo) error {
-			return tui.RunTags(ctx, tui.Deps{
+		openTUI: func(ctx context.Context, repo *hub.Repo) error {
+			return tui.Run(ctx, tui.Deps{
 				Registry:  hub.NewCache(client, hub.DefaultCacheTTL),
 				Clipboard: clip.NewNative(),
 			}, repo)
@@ -92,17 +94,20 @@ func (a *app) run(ctx context.Context, args []string) int {
 		_, _ = fmt.Fprintf(a.stdout, "hubtui %s\n", resolveVersion(version))
 		return exitOK
 	}
-	// The search screen arrives in a later step; until then an image is required.
-	if len(pos) != 1 || !a.stdoutIsTTY {
+	if len(pos) > 1 || !a.stdoutIsTTY {
 		fs.Usage()
 		return exitUsage
 	}
 
-	repo, err := hub.ParseRepo(pos[0])
-	if err != nil {
-		return a.usageError(fs, err.Error())
+	var repo *hub.Repo
+	if len(pos) == 1 {
+		r, err := hub.ParseRepo(pos[0])
+		if err != nil {
+			return a.usageError(fs, err.Error())
+		}
+		repo = &r
 	}
-	if err := a.openTagsTUI(ctx, repo); err != nil {
+	if err := a.openTUI(ctx, repo); err != nil {
 		return a.fail(err)
 	}
 	return exitOK

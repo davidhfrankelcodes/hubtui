@@ -48,7 +48,7 @@ func (f *fakeRegistry) Tags(_ context.Context, repo hub.Repo, opts hub.TagsOptio
 func runApp(t *testing.T, reg hub.Registry, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
 	var out, errOut bytes.Buffer
-	a := &app{stdout: &out, stderr: &errOut, registry: reg, openTagsTUI: func(context.Context, hub.Repo) error {
+	a := &app{stdout: &out, stderr: &errOut, registry: reg, openTUI: func(context.Context, *hub.Repo) error {
 		t.Error("TUI started unexpectedly")
 		return nil
 	}}
@@ -64,12 +64,14 @@ func TestRunTUI(t *testing.T) {
 		tuiErr     error
 		wantCode   int
 		wantRepo   *hub.Repo
+		wantSearch bool
 		wantStderr string
 	}{
 		{name: "image opens tags screen", args: []string{"nginx"}, tty: true, wantRepo: &hub.Repo{Namespace: "library", Name: "nginx"}},
 		{name: "namespaced image", args: []string{"grafana/grafana"}, tty: true, wantRepo: &hub.Repo{Namespace: "grafana", Name: "grafana"}},
 		{name: "not a terminal prints usage", args: []string{"nginx"}, tty: false, wantCode: 2, wantStderr: "Usage:"},
-		{name: "no args on a terminal prints usage until search exists", args: nil, tty: true, wantCode: 2, wantStderr: "Usage:"},
+		{name: "no args on a terminal opens search", args: nil, tty: true, wantSearch: true},
+		{name: "no args off a terminal prints usage", args: nil, tty: false, wantCode: 2, wantStderr: "Usage:"},
 		{name: "invalid image", args: []string{"nginx:latest"}, tty: true, wantCode: 2, wantStderr: "without a tag or digest"},
 		{name: "TUI failure", args: []string{"nginx"}, tty: true, tuiErr: errors.New("no tty"), wantCode: 1, wantStderr: "no tty", wantRepo: &hub.Repo{Namespace: "library", Name: "nginx"}},
 	}
@@ -77,13 +79,17 @@ func TestRunTUI(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var errOut bytes.Buffer
 			var got *hub.Repo
+			opened := false
 			a := &app{stdout: &bytes.Buffer{}, stderr: &errOut, registry: &fakeRegistry{}, stdoutIsTTY: tt.tty,
-				openTagsTUI: func(_ context.Context, r hub.Repo) error {
-					got = &r
+				openTUI: func(_ context.Context, r *hub.Repo) error {
+					opened, got = true, r
 					return tt.tuiErr
 				}}
 			if code := a.run(context.Background(), tt.args); code != tt.wantCode {
 				t.Errorf("exit code = %d, want %d (stderr: %s)", code, tt.wantCode, errOut.String())
+			}
+			if opened != (tt.wantRepo != nil || tt.wantSearch) {
+				t.Fatalf("TUI opened = %v, want %v", opened, !opened)
 			}
 			if (got == nil) != (tt.wantRepo == nil) || (got != nil && *got != *tt.wantRepo) {
 				t.Errorf("TUI opened with %v, want %v", got, tt.wantRepo)
@@ -127,7 +133,7 @@ func TestRunArgs(t *testing.T) {
 		{name: "version", args: []string{"--version"}, wantCode: 0, wantStdout: "hubtui "},
 		{name: "help", args: []string{"-h"}, wantCode: 0, wantStderr: "Usage:"},
 		{name: "unknown flag", args: []string{"--nope"}, wantCode: 2, wantStderr: "flag provided but not defined"},
-		{name: "no args prints usage", args: nil, wantCode: 2, wantStderr: "Usage:"},
+		{name: "no args off a terminal prints usage", args: nil, wantCode: 2, wantStderr: "Usage:"},
 		{name: "two images", args: []string{"nginx", "redis"}, wantCode: 2, wantStderr: "Usage:"},
 		{name: "search help", args: []string{"search", "-h"}, wantCode: 0, wantStderr: "hubtui search <query>"},
 		{name: "search without query", args: []string{"search", "--json"}, wantCode: 2, wantStderr: "missing query"},

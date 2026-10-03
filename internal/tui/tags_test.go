@@ -22,18 +22,55 @@ type tagsCall struct {
 	opts hub.TagsOptions
 }
 
+type searchCall struct {
+	ctx   context.Context
+	query string
+	opts  hub.PageOptions
+}
+
 // fakeRegistry serves tags in pages of whatever size the test configures,
-// independent of the requested page size.
+// independent of the requested page size. Search returns the repos whose
+// name contains the query, paged by the requested size.
 type fakeRegistry struct {
 	mu       sync.Mutex
 	tags     []hub.Tag
 	pageSize int
 	errs     map[int]error
 	calls    []tagsCall
+
+	repos       []hub.SearchResult
+	searchErrs  map[int]error
+	searchCalls []searchCall
 }
 
-func (f *fakeRegistry) Search(context.Context, string, hub.PageOptions) (*hub.SearchPage, error) {
-	return &hub.SearchPage{}, nil
+func (f *fakeRegistry) Search(ctx context.Context, query string, opts hub.PageOptions) (*hub.SearchPage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.searchCalls = append(f.searchCalls, searchCall{ctx: ctx, query: query, opts: opts})
+	if err := f.searchErrs[opts.Page]; err != nil {
+		return nil, err
+	}
+	var match []hub.SearchResult
+	for _, r := range f.repos {
+		if strings.Contains(r.Repo.String(), query) {
+			match = append(match, r)
+		}
+	}
+	start := min((opts.Page-1)*opts.PageSize, len(match))
+	end := min(start+opts.PageSize, len(match))
+	return &hub.SearchPage{Results: match[start:end], Total: len(match), Page: opts.Page, HasNext: end < len(match)}, nil
+}
+
+func (f *fakeRegistry) numSearches() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.searchCalls)
+}
+
+func (f *fakeRegistry) lastSearch() searchCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.searchCalls[len(f.searchCalls)-1]
 }
 
 func (f *fakeRegistry) Tags(ctx context.Context, _ hub.Repo, opts hub.TagsOptions) (*hub.TagPage, error) {
@@ -93,14 +130,14 @@ func (c *fakeClipboard) Copy(_ context.Context, text string) error {
 	return c.err
 }
 
-func newTestModel(reg hub.Registry) TagsModel {
+func newTestModel(reg hub.Registry) *tagsScreen {
 	return newTestModelFor(reg, &fakeClipboard{}, hub.Repo{Namespace: "library", Name: "nginx"})
 }
 
-func newTestModelFor(reg hub.Registry, cb Copier, repo hub.Repo) TagsModel {
-	m := NewTagsModel(context.Background(), Deps{Registry: reg, Clipboard: cb, Now: testNow}, repo)
-	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
-	return next.(TagsModel)
+func newTestModelFor(reg hub.Registry, cb Copier, repo hub.Repo) *tagsScreen {
+	m := newTagsScreen(context.Background(), Deps{Registry: reg, Clipboard: cb, Now: testNow}, 1, repo)
+	m.update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	return m
 }
 
 func keyMsg(s string) tea.KeyPressMsg {
@@ -120,19 +157,16 @@ func keyMsg(s string) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: r, Text: s}
 }
 
-func update(t *testing.T, m TagsModel, msg tea.Msg) (TagsModel, tea.Cmd) {
+// update keeps the value-returning shape of a tea.Model so the tests read as
+// a sequence of states.
+func update(t *testing.T, m *tagsScreen, msg tea.Msg) (*tagsScreen, tea.Cmd) {
 	t.Helper()
-	next, cmd := m.Update(msg)
-	tm, ok := next.(TagsModel)
-	if !ok {
-		t.Fatalf("Update returned %T", next)
-	}
-	return tm, cmd
+	return m, m.update(msg)
 }
 
 // press sends each key in turn, typing multi-character strings one rune at a
 // time unless they name a special key. It returns the last command.
-func press(t *testing.T, m TagsModel, keys ...string) (TagsModel, tea.Cmd) {
+func press(t *testing.T, m *tagsScreen, keys ...string) (*tagsScreen, tea.Cmd) {
 	t.Helper()
 	var cmd tea.Cmd
 	for _, k := range keys {
@@ -141,7 +175,7 @@ func press(t *testing.T, m TagsModel, keys ...string) (TagsModel, tea.Cmd) {
 	return m, cmd
 }
 
-func typeText(t *testing.T, m TagsModel, s string) TagsModel {
+func typeText(t *testing.T, m *tagsScreen, s string) *tagsScreen {
 	t.Helper()
 	for _, r := range s {
 		m, _ = update(t, m, keyMsg(string(r)))
@@ -178,7 +212,7 @@ func pageMsg(t *testing.T, cmd tea.Cmd) *tagsPageMsg {
 }
 
 // settle delivers fetch results until the model stops fetching.
-func settle(t *testing.T, m TagsModel, cmd tea.Cmd) TagsModel {
+func settle(t *testing.T, m *tagsScreen, cmd tea.Cmd) *tagsScreen {
 	t.Helper()
 	for range 50 {
 		pm := pageMsg(t, cmd)
@@ -191,17 +225,17 @@ func settle(t *testing.T, m TagsModel, cmd tea.Cmd) TagsModel {
 	return m
 }
 
-func viewNames(m TagsModel) []string {
+func viewNames(m *tagsScreen) []string {
 	var out []string
-	for _, i := range m.view {
+	for _, i := range m.visible {
 		out = append(out, m.all[i].Name)
 	}
 	return out
 }
 
-func selected(t *testing.T, m TagsModel) string {
+func selected(t *testing.T, m *tagsScreen) string {
 	t.Helper()
-	tag, ok := m.Selected()
+	tag, ok := m.selected()
 	if !ok {
 		t.Fatal("nothing selected")
 	}
@@ -211,7 +245,7 @@ func selected(t *testing.T, m TagsModel) string {
 func TestTagsInitialLoad(t *testing.T) {
 	reg := &fakeRegistry{tags: makeTags("t", 250), pageSize: 100}
 	m := newTestModel(reg)
-	m = settle(t, m, m.Init())
+	m = settle(t, m, m.init())
 
 	if reg.numCalls() != 1 {
 		t.Fatalf("calls = %d, want 1: a full page more than fills the screen", reg.numCalls())
@@ -234,7 +268,7 @@ func TestTagsInitialLoad(t *testing.T) {
 func TestTagsLazyPagination(t *testing.T) {
 	reg := &fakeRegistry{tags: makeTags("t", 250), pageSize: 100}
 	m := newTestModel(reg)
-	m = settle(t, m, m.Init())
+	m = settle(t, m, m.init())
 
 	m, cmd := press(t, m, "j", "j")
 	if pageMsg(t, cmd) != nil {
@@ -284,7 +318,7 @@ func TestTagsLazyPagination(t *testing.T) {
 func TestTagsShortPagesFillTheScreen(t *testing.T) {
 	reg := &fakeRegistry{tags: makeTags("t", 25), pageSize: 5}
 	m := newTestModel(reg)
-	m = settle(t, m, m.Init())
+	m = settle(t, m, m.init())
 	if len(m.all) != 25 {
 		t.Errorf("loaded %d tags, want all 25: pages shorter than the screen should keep loading", len(m.all))
 	}
@@ -296,7 +330,7 @@ func TestTagsDeduplicatesAcrossPages(t *testing.T) {
 	tags = slices.Insert(tags, 3, tags[2])
 	reg := &fakeRegistry{tags: tags, pageSize: 3}
 	m := newTestModel(reg)
-	m = settle(t, m, m.Init())
+	m = settle(t, m, m.init())
 	if got := strings.Join(viewNames(m), ","); got != "t0,t1,t2,t3,t4,t5" {
 		t.Errorf("tags = %s", got)
 	}
@@ -305,7 +339,7 @@ func TestTagsDeduplicatesAcrossPages(t *testing.T) {
 func TestTagsStaleResponsesDiscarded(t *testing.T) {
 	reg := &fakeRegistry{tags: makeTags("t", 10), pageSize: 100}
 	m := newTestModel(reg)
-	m = settle(t, m, m.Init())
+	m = settle(t, m, m.init())
 
 	m, first := press(t, m, "r")
 	firstMsg := pageMsg(t, first)
@@ -336,21 +370,21 @@ func TestTagsStaleResponsesDiscarded(t *testing.T) {
 func TestTagsRefreshBypassesCache(t *testing.T) {
 	reg := &fakeRegistry{tags: makeTags("t", 10), pageSize: 100}
 	m := newTestModel(reg)
-	m = settle(t, m, m.Init())
+	m = settle(t, m, m.init())
 	if reg.lastCall().opts.Fresh {
 		t.Error("initial load asked to bypass the cache")
 	}
 
 	m, cmd := press(t, m, "r")
-	if m.status != "refreshing…" {
-		t.Errorf("status = %q", m.status)
+	if m.bar.text != "refreshing…" {
+		t.Errorf("status = %q", m.bar.text)
 	}
 	m = settle(t, m, cmd)
 	if opts := reg.lastCall().opts; !opts.Fresh || opts.Page != 1 {
 		t.Errorf("refresh request = %+v, want fresh page 1", opts)
 	}
-	if m.status != "" {
-		t.Errorf("status after refresh = %q, want cleared", m.status)
+	if m.bar.text != "" {
+		t.Errorf("status after refresh = %q, want cleared", m.bar.text)
 	}
 }
 
@@ -385,10 +419,10 @@ func TestTagsErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			reg := &fakeRegistry{tags: makeTags("t", 10), pageSize: 100, errs: map[int]error{1: tt.err}}
 			m := newTestModel(reg)
-			m = settle(t, m, m.Init())
+			m = settle(t, m, m.init())
 
-			if !strings.Contains(m.status, tt.wantStatus) || m.statusIsErr != tt.wantErr {
-				t.Errorf("status = %q (error %v), want %q (error %v)", m.status, m.statusIsErr, tt.wantStatus, tt.wantErr)
+			if !strings.Contains(m.bar.text, tt.wantStatus) || m.bar.isErr != tt.wantErr {
+				t.Errorf("status = %q (error %v), want %q (error %v)", m.bar.text, m.bar.isErr, tt.wantStatus, tt.wantErr)
 			}
 			if m.loading {
 				t.Error("still loading after an error")
@@ -403,8 +437,8 @@ func TestTagsErrors(t *testing.T) {
 			reg.errs = nil
 			m, cmd = press(t, m, "r")
 			m = settle(t, m, cmd)
-			if len(m.all) != 10 || m.statusIsErr {
-				t.Errorf("after r: %d tags, status %q", len(m.all), m.status)
+			if len(m.all) != 10 || m.bar.isErr {
+				t.Errorf("after r: %d tags, status %q", len(m.all), m.bar.text)
 			}
 		})
 	}
@@ -417,13 +451,13 @@ func TestTagsAnonymousPageLimit(t *testing.T) {
 		errs:     map[int]error{3: &hub.APIError{StatusCode: 403, Message: "pagination offset too large for anonymous requests"}},
 	}
 	m := newTestModel(reg)
-	m = settle(t, m, m.Init())
+	m = settle(t, m, m.init())
 
 	if len(m.all) != 20 || m.hasNext {
 		t.Errorf("loaded %d, hasNext %v; want 20 and no more", len(m.all), m.hasNext)
 	}
-	if m.statusIsErr || !strings.Contains(m.status, "anonymous limit: first 20 tags") {
-		t.Errorf("status = %q (error %v)", m.status, m.statusIsErr)
+	if m.bar.isErr || !strings.Contains(m.bar.text, "anonymous limit: first 20 tags") {
+		t.Errorf("status = %q (error %v)", m.bar.text, m.bar.isErr)
 	}
 }
 
@@ -436,7 +470,7 @@ func TestTagsFilter(t *testing.T) {
 	}
 	reg := &fakeRegistry{tags: tags, pageSize: 100}
 	m := newTestModel(reg)
-	m = settle(t, m, m.Init())
+	m = settle(t, m, m.init())
 
 	m, _ = press(t, m, "/")
 	if !m.filtering {
@@ -456,7 +490,7 @@ func TestTagsFilter(t *testing.T) {
 	if m.filterErr == "" {
 		t.Error("invalid regex not reported")
 	}
-	if got := len(m.view); got != 2 {
+	if got := len(m.visible); got != 2 {
 		t.Errorf("invalid regex changed the view to %d rows", got)
 	}
 	m, _ = press(t, m, "backspace")
@@ -465,23 +499,23 @@ func TestTagsFilter(t *testing.T) {
 	}
 
 	m, _ = press(t, m, "enter")
-	if m.filtering || len(m.view) != 2 {
-		t.Errorf("enter: filtering %v, %d rows; want closed input, filter kept", m.filtering, len(m.view))
+	if m.filtering || len(m.visible) != 2 {
+		t.Errorf("enter: filtering %v, %d rows; want closed input, filter kept", m.filtering, len(m.visible))
 	}
 	if !strings.Contains(m.statusLine(), "2 match") {
 		t.Errorf("status line %q does not show the match count", m.statusLine())
 	}
 
 	m, _ = press(t, m, "esc")
-	if m.filterRE != nil || len(m.view) != 4 || m.input.Value() != "" {
-		t.Errorf("esc did not clear the filter: %d rows, value %q", len(m.view), m.input.Value())
+	if m.filterRE != nil || len(m.visible) != 4 || m.input.Value() != "" {
+		t.Errorf("esc did not clear the filter: %d rows, value %q", len(m.visible), m.input.Value())
 	}
 
 	m, _ = press(t, m, "/")
 	m = typeText(t, m, "perl")
 	m, _ = press(t, m, "esc")
-	if m.filtering || len(m.view) != 4 {
-		t.Errorf("esc while typing: filtering %v, %d rows", m.filtering, len(m.view))
+	if m.filtering || len(m.visible) != 4 {
+		t.Errorf("esc while typing: filtering %v, %d rows", m.filtering, len(m.visible))
 	}
 }
 
@@ -490,7 +524,7 @@ func TestTagsFilterLoadsMoreToFindMatches(t *testing.T) {
 	tags[250].Name = "needle"
 	reg := &fakeRegistry{tags: tags, pageSize: 100}
 	m := newTestModel(reg)
-	m = settle(t, m, m.Init())
+	m = settle(t, m, m.init())
 
 	m, _ = press(t, m, "/")
 	var cmd tea.Cmd
@@ -512,7 +546,7 @@ func TestTagsSort(t *testing.T) {
 	}
 	reg := &fakeRegistry{tags: tags, pageSize: 100}
 	m := newTestModel(reg)
-	m = settle(t, m, m.Init())
+	m = settle(t, m, m.init())
 
 	m, _ = press(t, m, "j") // select 1.9 so we can check it stays selected
 	steps := []struct {
@@ -542,7 +576,7 @@ func TestTagsQuitCancelsInFlight(t *testing.T) {
 		t.Run(k, func(t *testing.T) {
 			reg := &fakeRegistry{tags: makeTags("t", 10), pageSize: 100}
 			m := newTestModel(reg)
-			cmd := m.Init()
+			cmd := m.init()
 			_ = pageMsg(t, cmd) // the request has been made but not delivered
 			ctx := reg.lastCall().ctx
 
@@ -563,7 +597,7 @@ func TestTagsQuitCancelsInFlight(t *testing.T) {
 func TestTagsQuitWhileFilteringOnlyWithCtrlC(t *testing.T) {
 	reg := &fakeRegistry{tags: makeTags("t", 3), pageSize: 100}
 	m := newTestModel(reg)
-	m = settle(t, m, m.Init())
+	m = settle(t, m, m.init())
 	m, _ = press(t, m, "/")
 	m, _ = press(t, m, "q")
 	if m.input.Value() != "q" {
@@ -574,7 +608,7 @@ func TestTagsQuitWhileFilteringOnlyWithCtrlC(t *testing.T) {
 func TestTagsResize(t *testing.T) {
 	reg := &fakeRegistry{tags: makeTags("t", 10), pageSize: 100}
 	m := newTestModel(reg)
-	m = settle(t, m, m.Init())
+	m = settle(t, m, m.init())
 
 	m, _ = update(t, m, tea.WindowSizeMsg{Width: 120, Height: 40})
 	if m.table.Height() != 37 {
@@ -593,7 +627,7 @@ func TestTagsResize(t *testing.T) {
 	}
 }
 
-func spannedWidth(m TagsModel) int {
+func spannedWidth(m *tagsScreen) int {
 	total := 0
 	for _, c := range m.table.Columns() {
 		if c.Width > 0 {
@@ -680,7 +714,7 @@ func TestYank(t *testing.T) {
 			cb := &fakeClipboard{}
 			reg := &fakeRegistry{tags: []hub.Tag{tt.tag}, pageSize: 100}
 			m := newTestModelFor(reg, cb, tt.repo)
-			m = settle(t, m, m.Init())
+			m = settle(t, m, m.init())
 
 			m, cmd := press(t, m, tt.key)
 			msgs := runCmds(t, cmd)
@@ -690,8 +724,8 @@ func TestYank(t *testing.T) {
 				if sentOSC52 || len(cb.copied) != 0 {
 					t.Errorf("copied %q / %v despite the error", payload, cb.copied)
 				}
-				if !m.statusIsErr || !strings.HasPrefix(m.status, tt.wantError) {
-					t.Errorf("status = %q (error %v), want error starting %q", m.status, m.statusIsErr, tt.wantError)
+				if !m.bar.isErr || !strings.HasPrefix(m.bar.text, tt.wantError) {
+					t.Errorf("status = %q (error %v), want error starting %q", m.bar.text, m.bar.isErr, tt.wantError)
 				}
 				return
 			}
@@ -702,8 +736,8 @@ func TestYank(t *testing.T) {
 			if len(cb.copied) != 1 || cb.copied[0] != tt.want {
 				t.Errorf("native clipboard got %q, want [%q]", cb.copied, tt.want)
 			}
-			if wantStatus := "copied " + tt.want; m.status != wantStatus || m.statusIsErr {
-				t.Errorf("status = %q, want %q", m.status, wantStatus)
+			if wantStatus := "copied " + tt.want; m.bar.text != wantStatus || m.bar.isErr {
+				t.Errorf("status = %q, want %q", m.bar.text, wantStatus)
 			}
 		})
 	}
@@ -714,7 +748,7 @@ func TestYankStatusLine(t *testing.T) {
 	reg := &fakeRegistry{tags: []hub.Tag{tag}, pageSize: 100}
 
 	m := newTestModel(reg)
-	m = settle(t, m, m.Init())
+	m = settle(t, m, m.init())
 	m, _ = update(t, m, tea.WindowSizeMsg{Width: 200, Height: 24})
 	m, _ = press(t, m, "Y")
 	line := m.statusLine()
@@ -737,22 +771,22 @@ func TestYankStatusLine(t *testing.T) {
 func TestYankFlashExpires(t *testing.T) {
 	reg := &fakeRegistry{tags: makeTags("t", 3), pageSize: 100}
 	m := newTestModel(reg)
-	m = settle(t, m, m.Init())
+	m = settle(t, m, m.init())
 
 	m, _ = press(t, m, "y")
-	first := m.statusID
+	first := m.bar.id
 	m, _ = press(t, m, "j", "y")
-	if m.status != "copied nginx:t1" {
-		t.Fatalf("status = %q", m.status)
+	if m.bar.text != "copied nginx:t1" {
+		t.Fatalf("status = %q", m.bar.text)
 	}
 
 	m, _ = update(t, m, clearStatusMsg{id: first})
-	if m.status == "" {
+	if m.bar.text == "" {
 		t.Error("an older flash's expiry cleared a newer message")
 	}
-	m, _ = update(t, m, clearStatusMsg{id: m.statusID})
-	if m.status != "" {
-		t.Errorf("status = %q after expiry", m.status)
+	m, _ = update(t, m, clearStatusMsg{id: m.bar.id})
+	if m.bar.text != "" {
+		t.Errorf("status = %q after expiry", m.bar.text)
 	}
 }
 
@@ -770,18 +804,18 @@ func TestYankNativeClipboardResult(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			reg := &fakeRegistry{tags: makeTags("t", 1), pageSize: 100}
 			m := newTestModelFor(reg, &fakeClipboard{err: tt.err}, hub.Repo{Namespace: "library", Name: "nginx"})
-			m = settle(t, m, m.Init())
+			m = settle(t, m, m.init())
 			m, cmd := press(t, m, "y")
 			for _, msg := range runCmds(t, cmd) {
 				if cm, ok := msg.(clipboardMsg); ok {
 					m, _ = update(t, m, cm)
 				}
 			}
-			if m.statusIsErr != tt.wantErr {
-				t.Errorf("status = %q (error %v), want error %v", m.status, m.statusIsErr, tt.wantErr)
+			if m.bar.isErr != tt.wantErr {
+				t.Errorf("status = %q (error %v), want error %v", m.bar.text, m.bar.isErr, tt.wantErr)
 			}
-			if !tt.wantErr && m.status != "copied nginx:t0" {
-				t.Errorf("status = %q", m.status)
+			if !tt.wantErr && m.bar.text != "copied nginx:t0" {
+				t.Errorf("status = %q", m.bar.text)
 			}
 		})
 	}
@@ -791,13 +825,13 @@ func TestYankWithNothingSelected(t *testing.T) {
 	cb := &fakeClipboard{}
 	reg := &fakeRegistry{pageSize: 100}
 	m := newTestModelFor(reg, cb, hub.Repo{Namespace: "library", Name: "nginx"})
-	m = settle(t, m, m.Init())
+	m = settle(t, m, m.init())
 	m, cmd := press(t, m, "y")
 	if _, sent := osc52Payload(runCmds(t, cmd)); sent || len(cb.copied) != 0 {
 		t.Error("copied something with no tag selected")
 	}
-	if !m.statusIsErr {
-		t.Errorf("status = %q, want an error", m.status)
+	if !m.bar.isErr {
+		t.Errorf("status = %q, want an error", m.bar.text)
 	}
 }
 
