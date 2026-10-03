@@ -217,19 +217,15 @@ func (m *tagsScreen) handlePage(msg tagsPageMsg) tea.Cmd {
 }
 
 func (m *tagsScreen) setError(err error) {
-	var rl *hub.RateLimitError
 	switch {
 	case errors.Is(err, hub.ErrPageLimit):
-		// Not a failure: Hub simply stops here for anonymous users.
+		// Not a failure: Hub simply stops here.
 		m.hasNext = false
-		m.bar.set(fmt.Sprintf("anonymous limit: first %d tags", len(m.all)), false)
+		m.bar.set(m.pageLimitText(len(m.all), "tags"), false)
 	case errors.Is(err, hub.ErrNotFound):
 		m.bar.set(fmt.Sprintf("repository %s not found", m.repo), true)
-	case errors.As(err, &rl):
-		m.bar.set(rl.Error()+" (press r to retry)", true)
-	case errors.Is(err, context.Canceled):
 	default:
-		m.bar.set(err.Error()+" (press r to retry)", true)
+		m.showError(err)
 	}
 }
 

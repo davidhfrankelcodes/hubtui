@@ -26,6 +26,9 @@ type Deps struct {
 	Clipboard Copier
 	Browser   Opener
 	Now       func() time.Time
+	// User is the Docker Hub account requests are made as; empty when
+	// anonymous.
+	User string
 }
 
 // screen is one page of the UI. The App keeps them in a stack.

@@ -14,6 +14,7 @@ import (
 
 	"github.com/davidhfrankelcodes/hubtui/internal/browser"
 	"github.com/davidhfrankelcodes/hubtui/internal/clip"
+	"github.com/davidhfrankelcodes/hubtui/internal/config"
 	"github.com/davidhfrankelcodes/hubtui/internal/hub"
 	"github.com/davidhfrankelcodes/hubtui/internal/tui"
 )
@@ -25,6 +26,9 @@ const usage = `Usage:
   hubtui                          search Docker Hub interactively
   hubtui <image>                  browse an image's tags interactively
   hubtui --version
+
+Set DOCKERHUB_USERNAME and DOCKERHUB_TOKEN (a personal access token) to
+make authenticated requests; anonymous access is the default.
   hubtui search <query> --json
   hubtui tags <image> --json [--arch <arch>] [--limit <n>]
 `
@@ -55,7 +59,16 @@ func mainCode() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	client, err := hub.NewClient(hub.Options{UserAgent: "hubtui/" + resolveVersion(version)})
+	cfg, err := config.FromEnv(os.Getenv)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "hubtui: %v\n", err)
+		return exitUsage
+	}
+	client, err := hub.NewClient(hub.Options{
+		UserAgent: "hubtui/" + resolveVersion(version),
+		Username:  cfg.Username,
+		Token:     cfg.Token,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "hubtui: %v\n", err)
 		return exitError
@@ -70,6 +83,7 @@ func mainCode() int {
 				Registry:  hub.NewCache(client, hub.DefaultCacheTTL),
 				Clipboard: clip.NewNative(),
 				Browser:   browser.New(),
+				User:      cfg.Username,
 			}, repo)
 		},
 	}

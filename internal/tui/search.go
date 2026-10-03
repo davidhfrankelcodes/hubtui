@@ -261,15 +261,11 @@ func (s *searchScreen) handleResults(msg searchResultMsg) tea.Cmd {
 
 	if msg.err != nil {
 		s.stalled = true
-		var rl *hub.RateLimitError
-		switch {
-		case errors.Is(msg.err, hub.ErrPageLimit):
+		if errors.Is(msg.err, hub.ErrPageLimit) {
 			s.hasNext = false
-			s.bar.set(fmt.Sprintf("anonymous limit: first %d results", len(s.results)), false)
-		case errors.As(msg.err, &rl):
-			s.bar.set(rl.Error()+" (press r to retry)", true)
-		default:
-			s.bar.set(msg.err.Error()+" (press r to retry)", true)
+			s.bar.set(s.pageLimitText(len(s.results), "results"), false)
+		} else {
+			s.showError(msg.err)
 		}
 		return nil
 	}
@@ -356,6 +352,9 @@ func (s *searchScreen) layout() {
 
 func (s *searchScreen) view() string {
 	title := s.styles.title.Render("hubtui") + s.styles.dim.Render(" · search Docker Hub")
+	if s.deps.User != "" {
+		title += s.styles.dim.Render(" · signed in as " + s.deps.User)
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, title, s.input.View(), s.table.View(), s.statusLine())
 }
 

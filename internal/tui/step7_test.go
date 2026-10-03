@@ -353,3 +353,26 @@ func TestAppHelpFitsAt80x24(t *testing.T) {
 		t.Error("help box is cut off at 80x24")
 	}
 }
+
+func TestSignedInWording(t *testing.T) {
+	reg := &fakeRegistry{
+		repos:      repoResults("nginx"),
+		tags:       makeTags("t", 30),
+		pageSize:   10,
+		errs:       map[int]error{2: &hub.APIError{StatusCode: 403, Message: "pagination offset too large"}},
+		searchErrs: nil,
+	}
+	deps := Deps{Registry: reg, Clipboard: &fakeClipboard{}, Browser: &fakeOpener{}, Now: testNow, User: "alice"}
+
+	s := newSearchScreen(context.Background(), deps, 1)
+	if !strings.Contains(stripANSI(s.view()), "signed in as alice") {
+		t.Error("search title does not show the account")
+	}
+
+	m := newTagsScreen(context.Background(), deps, 2, hub.Repo{Namespace: "library", Name: "nginx"})
+	m.update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = settle(t, m, m.init())
+	if m.bar.text != "Docker Hub stopped after 10 tags" {
+		t.Errorf("signed-in page limit status = %q; the anonymous wording would be wrong", m.bar.text)
+	}
+}

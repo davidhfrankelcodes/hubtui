@@ -405,7 +405,13 @@ func TestTagsErrors(t *testing.T) {
 		{
 			name:       "rate limited",
 			err:        &hub.RateLimitError{RetryAfter: 30 * time.Second},
-			wantStatus: "retry in 30s",
+			wantStatus: "rate limited by Docker Hub until 12:00:30; press r after that",
+			wantErr:    true, wantStall: true,
+		},
+		{
+			name:       "login rejected",
+			err:        fmt.Errorf("logging in as alice: %w: unauthorized", hub.ErrAuth),
+			wantStatus: "Docker Hub login failed; check DOCKERHUB_TOKEN",
 			wantErr:    true, wantStall: true,
 		},
 		{

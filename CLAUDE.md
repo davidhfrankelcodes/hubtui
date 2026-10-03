@@ -75,6 +75,8 @@ Verify each endpoint against the live API with `curl` before writing the client 
 - Official images live in the `library` namespace. Accept `nginx` and normalize to `library/nginx` for requests; display it as `nginx`.
 - A tag has a top-level digest (the multi-arch index) and a per-platform list of images, each with its own digest and size. Confirm which is which against `docker buildx imagetools inspect <image>:<tag>` before relying on it. The yanked digest must be the index digest, so the reference works on any architecture.
 - Anonymous access is the default. If `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` are both set, authenticate with them. Never log, print, or write the token anywhere.
+  - Login: `POST /v2/auth/token` with `{"identifier": user, "secret": PAT}` returns `{"access_token": ...}`; send it as `Authorization: Bearer`. Bad credentials and expired access tokens both give 401. Verified live 2026-10-02.
+  - Signed in, the pagination caps above do not apply (all 1339 nginx tags load) and the rate limit rises from 180 to 600 (`x-ratelimit-limit`).
 - Handle HTTP 429: respect `Retry-After`, show a status-bar message, do not retry in a tight loop.
 
 ## Screens

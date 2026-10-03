@@ -15,6 +15,8 @@ var (
 	// ErrPageLimit means Docker Hub refused to page further. Anonymous
 	// requests stop after 1000 tags or 200 search results.
 	ErrPageLimit = errors.New("docker hub pagination limit reached")
+	// ErrAuth means Docker Hub rejected the configured credentials.
+	ErrAuth = errors.New("docker hub login failed")
 )
 
 // APIError is a non-success response from Docker Hub. Use errors.Is with
@@ -40,10 +42,11 @@ func (e *APIError) Is(target error) bool {
 	return false
 }
 
-// RateLimitError is returned for HTTP 429. The client never retries on its
-// own; callers decide whether and when to try again.
+// RateLimitError is returned for HTTP 429, and for any request made before
+// the wait it announced is over. The client never retries on its own.
 type RateLimitError struct {
-	// RetryAfter is how long to wait. Zero means the server gave no hint.
+	// RetryAfter is how long to wait: the server's hint, or a default
+	// backoff when it gave none.
 	RetryAfter time.Duration
 }
 

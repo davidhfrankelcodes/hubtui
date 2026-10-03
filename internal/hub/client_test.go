@@ -377,14 +377,14 @@ func TestTagsErrors(t *testing.T) {
 			wantRateLimit: true, wantRetryAfter: 120 * time.Second,
 		},
 		{
-			name:          "429 reset in the past",
+			name:          "429 reset in the past backs off anyway",
 			handler:       raw(429, http.Header{"Retry-After": {now.Add(-time.Minute).Format(http.TimeFormat)}}, ""),
-			wantRateLimit: true, wantRetryAfter: 0,
+			wantRateLimit: true, wantRetryAfter: defaultRateLimitWait,
 		},
 		{
-			name:          "429 without hints",
+			name:          "429 without hints backs off by default",
 			handler:       raw(429, nil, "slow down"),
-			wantRateLimit: true, wantRetryAfter: 0,
+			wantRateLimit: true, wantRetryAfter: defaultRateLimitWait,
 		},
 		{
 			name:        "HTML error page from the CDN",

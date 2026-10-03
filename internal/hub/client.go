@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -78,19 +80,37 @@ type TagsOptions struct {
 	Order TagOrder
 }
 
+// defaultRateLimitWait applies when a 429 carries no hint, so callers still
+// back off instead of retrying at once.
+const defaultRateLimitWait = 30 * time.Second
+
 // Options configures a Client.
 type Options struct {
 	BaseURL    string // defaults to DefaultBaseURL
 	HTTPClient *http.Client
 	UserAgent  string
+	// Username and Token (a personal access token) enable authenticated
+	// requests. Both or neither must be set.
+	Username string
+	Token    Secret
 }
 
-// Client talks to the Docker Hub API.
+// Client talks to the Docker Hub API. It is safe for concurrent use.
 type Client struct {
 	baseURL   *url.URL
 	http      *http.Client
 	userAgent string
+	username  string
+	token     Secret
 	now       func() time.Time
+
+	mu sync.Mutex
+	// bearer is the access token from logging in; empty until the first
+	// authenticated request or after it is rejected.
+	bearer Secret
+	// blockedUntil is set by a 429; requests before then fail without
+	// touching the network, so nothing can retry in a tight loop.
+	blockedUntil time.Time
 }
 
 var _ Registry = (*Client)(nil)
@@ -109,12 +129,32 @@ func NewClient(opts Options) (*Client, error) {
 		return nil, fmt.Errorf("base URL %q must be absolute", base)
 	}
 
+	if (opts.Username == "") != (opts.Token == "") {
+		return nil, errors.New("docker hub credentials need both a username and a token")
+	}
+
 	hc := opts.HTTPClient
 	if hc == nil {
 		hc = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &Client{baseURL: u, http: hc, userAgent: opts.UserAgent, now: time.Now}, nil
+	return &Client{
+		baseURL:   u,
+		http:      hc,
+		userAgent: opts.UserAgent,
+		username:  opts.Username,
+		token:     opts.Token,
+		now:       time.Now,
+	}, nil
 }
+
+// Format implements fmt.Formatter. fmt cannot call Secret's Format on
+// unexported fields, so the client redacts itself as a whole.
+func (c *Client) Format(f fmt.State, _ rune) {
+	_, _ = fmt.Fprintf(f, "hub.Client{base: %s, user: %q, authenticated: %t}", c.baseURL, c.username, c.Authenticated())
+}
+
+// Authenticated reports whether the client sends credentials.
+func (c *Client) Authenticated() bool { return c.token != "" }
 
 // Search finds repositories matching query.
 func (c *Client) Search(ctx context.Context, query string, opts PageOptions) (*SearchPage, error) {
@@ -196,40 +236,167 @@ func (c *Client) Tags(ctx context.Context, repo Repo, opts TagsOptions) (*TagPag
 }
 
 func (c *Client) get(ctx context.Context, u *url.URL, out any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err := c.checkBlocked(); err != nil {
+		return err
+	}
+
+	bearer, err := c.authorization(ctx)
 	if err != nil {
-		return fmt.Errorf("building request: %w", err)
+		return err
+	}
+	status, header, body, err := c.do(ctx, http.MethodGet, u, nil, bearer)
+	if err != nil {
+		return err
+	}
+	// An access token can expire mid-session; log in again once and retry.
+	if status == http.StatusUnauthorized && c.Authenticated() {
+		c.dropBearer(bearer)
+		if bearer, err = c.authorization(ctx); err != nil {
+			return err
+		}
+		if status, header, body, err = c.do(ctx, http.MethodGet, u, nil, bearer); err != nil {
+			return err
+		}
+	}
+
+	if err := c.checkStatus(status, header, body); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(body, out); err != nil {
+		return fmt.Errorf("decoding response: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) checkStatus(status int, header http.Header, body []byte) error {
+	switch {
+	case status == http.StatusTooManyRequests:
+		wait := retryAfter(header, c.now())
+		if wait <= 0 {
+			wait = defaultRateLimitWait
+		}
+		c.mu.Lock()
+		c.blockedUntil = c.now().Add(wait)
+		c.mu.Unlock()
+		return &RateLimitError{RetryAfter: wait}
+	case status != http.StatusOK:
+		return &APIError{StatusCode: status, Message: errorMessage(body)}
+	}
+	return nil
+}
+
+func (c *Client) checkBlocked() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if wait := c.blockedUntil.Sub(c.now()); wait > 0 {
+		return &RateLimitError{RetryAfter: wait}
+	}
+	return nil
+}
+
+// authorization returns the bearer token to send, logging in if needed.
+// Anonymous clients get "".
+func (c *Client) authorization(ctx context.Context) (Secret, error) {
+	if !c.Authenticated() {
+		return "", nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.bearer != "" {
+		return c.bearer, nil
+	}
+	// Holding the lock through the login makes concurrent first requests
+	// share one login instead of racing to make several.
+	b, err := c.login(ctx)
+	if err != nil {
+		return "", err
+	}
+	c.bearer = b
+	return b, nil
+}
+
+// dropBearer forgets a rejected token, unless another request already
+// replaced it.
+func (c *Client) dropBearer(rejected Secret) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.bearer == rejected {
+		c.bearer = ""
+	}
+}
+
+// login exchanges the personal access token for a short-lived access token.
+// Called with c.mu held.
+func (c *Client) login(ctx context.Context) (Secret, error) {
+	payload, err := json.Marshal(struct {
+		Identifier string `json:"identifier"`
+		Secret     string `json:"secret"`
+	}{c.username, c.token.Reveal()})
+	if err != nil {
+		return "", fmt.Errorf("encoding login: %w", err)
+	}
+
+	status, header, body, err := c.do(ctx, http.MethodPost, c.baseURL.JoinPath("v2", "auth", "token"), payload, "")
+	if err != nil {
+		return "", fmt.Errorf("logging in as %s: %w", c.username, err)
+	}
+	if status == http.StatusTooManyRequests {
+		wait := retryAfter(header, c.now())
+		if wait <= 0 {
+			wait = defaultRateLimitWait
+		}
+		c.blockedUntil = c.now().Add(wait)
+		return "", &RateLimitError{RetryAfter: wait}
+	}
+	if status != http.StatusOK {
+		return "", fmt.Errorf("logging in as %s: %w: %s", c.username, ErrAuth, errorMessage(body))
+	}
+
+	var res struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(body, &res); err != nil || res.AccessToken == "" {
+		return "", fmt.Errorf("logging in as %s: %w: no access token in response", c.username, ErrAuth)
+	}
+	return Secret(res.AccessToken), nil
+}
+
+// do sends one request and reads the whole (bounded) body. Error messages
+// carry the URL but never a header, so credentials cannot leak through them.
+func (c *Client) do(ctx context.Context, method string, u *url.URL, payload []byte, bearer Secret) (int, http.Header, []byte, error) {
+	var reqBody io.Reader
+	if payload != nil {
+		reqBody = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), reqBody)
+	if err != nil {
+		return 0, nil, nil, fmt.Errorf("building request: %w", err)
 	}
 	req.Header.Set("Accept", "application/json")
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	if c.userAgent != "" {
 		req.Header.Set("User-Agent", c.userAgent)
+	}
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer.Reveal())
 	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
+		return 0, nil, nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyBytes+1))
 	if err != nil {
-		return fmt.Errorf("reading response: %w", err)
+		return 0, nil, nil, fmt.Errorf("reading response: %w", err)
 	}
 	if len(body) > maxBodyBytes {
-		return fmt.Errorf("response exceeds %d bytes", maxBodyBytes)
+		return 0, nil, nil, fmt.Errorf("response exceeds %d bytes", maxBodyBytes)
 	}
-
-	switch {
-	case resp.StatusCode == http.StatusTooManyRequests:
-		return &RateLimitError{RetryAfter: retryAfter(resp.Header, c.now())}
-	case resp.StatusCode != http.StatusOK:
-		return &APIError{StatusCode: resp.StatusCode, Message: errorMessage(body)}
-	}
-
-	if err := json.Unmarshal(body, out); err != nil {
-		return fmt.Errorf("decoding response: %w", err)
-	}
-	return nil
+	return resp.StatusCode, resp.Header, body, nil
 }
 
 // errorMessage pulls Hub's {"message": ...} out of an error body. Errors from

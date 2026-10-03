@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -73,6 +74,34 @@ func (b *base) handleShared(msg tea.Msg) (handled bool) {
 		return false
 	}
 	return true
+}
+
+// showError puts a request error in the status bar. Rate limits say when
+// to try again rather than counting down, so the screen does not need a
+// ticking timer just to show it.
+func (b *base) showError(err error) {
+	var rl *hub.RateLimitError
+	switch {
+	case errors.As(err, &rl):
+		until := b.deps.Now().Add(rl.RetryAfter).Format("15:04:05")
+		b.bar.set("rate limited by Docker Hub until "+until+"; press r after that", true)
+	case errors.Is(err, hub.ErrAuth):
+		// Short enough to fit beside the counters at 80 columns; the full
+		// reason is in the error, but what to fix is what matters here.
+		b.bar.set("Docker Hub login failed; check DOCKERHUB_TOKEN", true)
+	case errors.Is(err, context.Canceled):
+	default:
+		b.bar.set(err.Error()+" (press r to retry)", true)
+	}
+}
+
+// pageLimitText explains why a list stops short. The anonymous limits are
+// verified; any limit for signed-in users is not, so it is not described.
+func (b *base) pageLimitText(n int, what string) string {
+	if b.deps.User == "" {
+		return fmt.Sprintf("anonymous limit: first %d %s", n, what)
+	}
+	return fmt.Sprintf("Docker Hub stopped after %d %s", n, what)
 }
 
 // yankText builds exactly what each yank key copies.
