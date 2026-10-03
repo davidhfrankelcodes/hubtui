@@ -363,5 +363,5 @@ func (s *searchScreen) statusLine() string {
 	if s.query != "" && (len(s.results) > 0 || s.total > 0) {
 		right = fmt.Sprintf("%d/%d results", len(s.results), s.total)
 	}
-	return s.bar.render(s.styles, s.width, right, s.loading)
+	return s.base.statusLine(right, s.loading)
 }

@@ -164,7 +164,7 @@ func (d *detailScreen) view() string {
 		parts = append(parts, d.table.View())
 	}
 	right := fmt.Sprintf("%d platforms", len(d.tag.Platforms))
-	parts = append(parts, d.bar.render(d.styles, d.width, right, false))
+	parts = append(parts, d.statusLine(right, false))
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 

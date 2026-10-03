@@ -519,5 +519,5 @@ func (m *tagsScreen) statusLine() string {
 		right = append(right, "stable")
 	}
 	right = append(right, fmt.Sprintf("%d/%d loaded", len(m.all), m.total), "sort: "+m.sort.String())
-	return m.bar.render(m.styles, m.width, strings.Join(right, " · "), m.loading)
+	return m.base.statusLine(strings.Join(right, " · "), m.loading)
 }

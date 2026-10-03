@@ -1,11 +1,14 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/davidhfrankelcodes/hubtui/internal/hub"
 )
 
 // flashDuration is how long a confirmation stays in the status bar.
@@ -52,10 +55,35 @@ func (b *statusBar) expire(id int) {
 	}
 }
 
-func (b statusBar) render(st styles, width int, right string, loading bool) string {
+// quota is the styled request-quota segment of the status bar.
+type quota struct {
+	text string
+	// urgent marks a quota running low: worth more than the other counters
+	// when the line is too narrow for both.
+	urgent bool
+}
+
+// render lays out the bar. right is plain text shown dim; q goes after it.
+func (b statusBar) render(st styles, width int, right string, q quota, loading bool) string {
+	showQuota := q.text != ""
+	if showQuota && right != "" && lipgloss.Width(right)+3+lipgloss.Width(q.text) > width {
+		if q.urgent {
+			right = ""
+		} else {
+			showQuota = false
+		}
+	}
+	// Counters are clipped only when they alone are wider than the screen,
+	// leaving the column that separates them from the message.
 	r := ""
 	if right != "" {
-		r = st.dim.Render(right)
+		r = st.dim.Render(truncate(right, width-1))
+	}
+	if showQuota {
+		if r != "" {
+			r += st.dim.Render(" · ")
+		}
+		r += q.text
 	}
 
 	if b.exact {
@@ -80,6 +108,26 @@ func (b statusBar) render(st styles, width int, right string, loading bool) stri
 	l := style.Render(truncate(left, avail))
 	gap := max(width-lipgloss.Width(l)-lipgloss.Width(r), 1)
 	return l + strings.Repeat(" ", gap) + r
+}
+
+// lowQuota is the share of the quota below which the indicator warns. Lazy
+// paging and a narrow filter can spend a page per keypress.
+const lowQuota = 0.1
+
+// quotaText formats the request quota. It stays dim while there is plenty
+// left; when it runs low it says when it refills.
+func quotaText(st styles, r hub.RateLimit, now time.Time) quota {
+	text := fmt.Sprintf("api %d/%d", r.Remaining, r.Limit)
+	if float64(r.Remaining) >= lowQuota*float64(r.Limit) {
+		return quota{text: st.dim.Render(text)}
+	}
+	if wait := r.Reset.Sub(now); wait > 0 {
+		text += fmt.Sprintf(" (full in %s)", wait.Round(time.Second))
+	}
+	if r.Remaining == 0 {
+		return quota{text: st.err.Render(text), urgent: true}
+	}
+	return quota{text: st.warn.Render(text), urgent: true}
 }
 
 // padTo right-aligns s in w cells, or returns "" when it does not fit.

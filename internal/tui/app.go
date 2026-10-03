@@ -29,6 +29,10 @@ type Deps struct {
 	// User is the Docker Hub account requests are made as; empty when
 	// anonymous.
 	User string
+	// RateLimit reports the request quota from the latest response. It only
+	// reads what the client already saw, so it is safe to call from View.
+	// Nil hides the indicator.
+	RateLimit func() (hub.RateLimit, bool)
 }
 
 // screen is one page of the UI. The App keeps them in a stack.

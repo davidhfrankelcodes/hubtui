@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -27,12 +28,20 @@ type authServer struct {
 	authSeen  []string
 	loginCode int // non-zero overrides the login response
 	loginBody []string
+	// remaining, when non-zero, is sent as X-RateLimit-Remaining on every
+	// response, the login included, as Hub does.
+	remaining int
 }
 
 func (s *authServer) handler(t *testing.T) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		if s.remaining != 0 {
+			w.Header().Set("X-RateLimit-Limit", "600")
+			w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(s.remaining))
+			s.remaining--
+		}
 		if r.URL.Path == "/v2/auth/token" {
 			if r.Method != http.MethodPost || r.Header.Get("Content-Type") != "application/json" {
 				t.Errorf("login: %s with content type %q", r.Method, r.Header.Get("Content-Type"))
@@ -102,6 +111,26 @@ func TestAuthLogsInOnceAndSendsBearer(t *testing.T) {
 		if a != "Bearer access-1" {
 			t.Errorf("Authorization = %q", a)
 		}
+	}
+}
+
+// The login response carries a quota and arrives while the login holds the
+// client's lock; recording it must not deadlock.
+func TestAuthRecordsQuotaFromLogin(t *testing.T) {
+	s := &authServer{remaining: 599}
+	c := newAuthClient(t, s, testToken)
+	done := make(chan error, 1)
+	go func() { done <- tags(c) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("signed-in request did not finish: deadlock recording the quota")
+	}
+	if r, ok := c.RateLimit(); !ok || r.Limit != 600 || r.Remaining != 598 {
+		t.Errorf("RateLimit() = %+v, %v; want 598/600 from the tags response", r, ok)
 	}
 }
 

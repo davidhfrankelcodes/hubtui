@@ -12,6 +12,7 @@ type styles struct {
 	title  lipgloss.Style
 	dim    lipgloss.Style
 	err    lipgloss.Style
+	warn   lipgloss.Style
 	notice lipgloss.Style
 	table  table.Styles
 	// The help box is opaque and bordered so it reads as a layer above the
@@ -25,6 +26,7 @@ func newStyles() styles {
 		title:  lipgloss.NewStyle().Bold(true),
 		dim:    lipgloss.NewStyle().Foreground(lipgloss.BrightBlack),
 		err:    lipgloss.NewStyle().Foreground(lipgloss.Red),
+		warn:   lipgloss.NewStyle().Foreground(lipgloss.Yellow),
 		notice: lipgloss.NewStyle().Foreground(lipgloss.Green),
 		table: table.Styles{
 			Header:   lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(lipgloss.Blue),

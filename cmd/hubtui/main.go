@@ -85,6 +85,7 @@ func mainCode() int {
 				Clipboard: clip.NewNative(),
 				Browser:   browser.New(),
 				User:      cfg.Username,
+				RateLimit: client.RateLimit,
 			}, repo)
 		},
 	}

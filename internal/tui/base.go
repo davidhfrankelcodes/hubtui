@@ -76,6 +76,17 @@ func (b *base) handleShared(msg tea.Msg) (handled bool) {
 	return true
 }
 
+// statusLine renders the screen's status bar with the request quota.
+func (b *base) statusLine(right string, loading bool) string {
+	var q quota
+	if b.deps.RateLimit != nil {
+		if r, ok := b.deps.RateLimit(); ok {
+			q = quotaText(b.styles, r, b.deps.Now())
+		}
+	}
+	return b.bar.render(b.styles, b.width, right, q, loading)
+}
+
 // showError puts a request error in the status bar. Rate limits say when
 // to try again rather than counting down, so the screen does not need a
 // ticking timer just to show it.

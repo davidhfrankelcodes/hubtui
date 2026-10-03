@@ -104,7 +104,7 @@ Anonymous access works out of the box. Anonymous requests are limited, though:
 | --- | --- | --- |
 | Tags per repository | first 1,000 | all |
 | Search results | first 200 | more |
-| Requests (`x-ratelimit-limit`) | 180 | 600 |
+| Requests per minute (`x-ratelimit-limit`) | 180 | 600 |
 
 To sign in, create a personal access token on hub.docker.com (Account settings → Personal access tokens; **Public Repo Read-only** is enough) and set both variables:
 
@@ -113,7 +113,7 @@ export DOCKERHUB_USERNAME=yourname
 export DOCKERHUB_TOKEN=dckr_pat_...
 ```
 
-hubtui reads nothing else: not `~/.docker/config.json` and not credential helpers. The token is never logged or printed. If Docker Hub rate-limits you, hubtui shows when to try again and makes no requests until then.
+hubtui reads nothing else: not `~/.docker/config.json` and not credential helpers. The token is never logged or printed. The status bar shows the requests left in the current minute, such as `api 175/180`. Below 10% it turns yellow and says when the quota refills; at zero it turns red. If Docker Hub rate-limits you, hubtui shows when to try again and makes no requests until then.
 
 ## Development
 

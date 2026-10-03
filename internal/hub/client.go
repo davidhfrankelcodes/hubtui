@@ -111,6 +111,12 @@ type Client struct {
 	// blockedUntil is set by a 429; requests before then fail without
 	// touching the network, so nothing can retry in a tight loop.
 	blockedUntil time.Time
+	// rateMu guards the quota separately: mu is held through a login, and
+	// the login response reports the quota too.
+	rateMu sync.Mutex
+	// rate is the quota from the last response that reported one.
+	rate      RateLimit
+	rateKnown bool
 }
 
 var _ Registry = (*Client)(nil)
@@ -393,6 +399,8 @@ func (c *Client) do(ctx context.Context, method string, u *url.URL, payload []by
 	if err != nil {
 		return 0, nil, nil, fmt.Errorf("reading response: %w", err)
 	}
+	// Every response counts against the quota, errors included.
+	c.recordRateLimit(resp.Header)
 	if len(body) > maxBodyBytes {
 		return 0, nil, nil, fmt.Errorf("response exceeds %d bytes", maxBodyBytes)
 	}
