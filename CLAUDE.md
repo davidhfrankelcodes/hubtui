@@ -37,6 +37,7 @@ make run       # go run ./cmd/hubtui
 make test      # go test ./... -race
 make lint      # golangci-lint run
 make fmt       # gofmt + goimports
+make tag TAG=vX.Y.Z  # annotated release tag from CHANGELOG.md; never pushes
 ```
 
 Run `make lint test` before declaring any task done. CI calls these same make targets and nothing else.
@@ -128,6 +129,8 @@ Prints JSON to stdout and exits. No TUI, no color, errors to stderr with a non-z
 - Use the terminal's ANSI palette (semantic colors), not hardcoded hex values, so the UI follows the user's theme.
 - Any shell script in this repo prints explicit numbered steps (`[1/4] Building...`) and uses functions rather than aliases.
 - Comments explain why, not what.
+- Record user-visible changes (features, fixes, changed keys, flags or JSON output) under `## [Unreleased]` in `CHANGELOG.md` in the same commit. Versions follow semver; before 1.0.0 a minor bump may break keys, flags or JSON.
+- Do not push a tag unless asked: a pushed tag publishes release archives and the container image.
 
 ## Testing
 

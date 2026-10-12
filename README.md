@@ -18,7 +18,7 @@ go install github.com/davidhfrankelcodes/hubtui/cmd/hubtui@latest
 
 Or clone and `make build`, which writes `./bin/hubtui`.
 
-Release archives for Linux and macOS on amd64 and arm64, with `SHA256SUMS`, are built by `make release`. A multi-arch container image is built by `make image`:
+Release archives for Linux and macOS on amd64 and arm64, with `SHA256SUMS`, are built for each release. A multi-arch container image is published alongside them:
 
 ```sh
 docker run -it --rm docker.io/davidhfrankelcodes/hubtui nginx
@@ -127,9 +127,20 @@ make build     # ./bin/hubtui
 make test      # go test ./... -race
 make lint      # golangci-lint run
 make fmt       # gofmt + goimports
-make release   # dist/ archives and SHA256SUMS
+make release   # dist/ archives and SHA256SUMS (tagged versions only)
+make tag TAG=v0.2.0  # create a release tag; see Releasing
 make image     # multi-arch container image
 make demo      # re-record docs/demo.gif from docs/demo.tape (needs Docker)
 ```
 
 Tests never touch the network: the API client is tested against recorded responses in `testdata/`. CI (`Jenkinsfile`) runs the same make targets. See `CLAUDE.md` for the architecture and the conventions the code follows.
+
+## Releasing
+
+Versions follow [Semantic Versioning](https://semver.org/); changes are recorded in [`CHANGELOG.md`](CHANGELOG.md).
+
+1. Move the notes under `## [Unreleased]` in `CHANGELOG.md` to a new `## [X.Y.Z] - YYYY-MM-DD` section, update the links at the bottom, and commit on `main`.
+2. Run `make tag TAG=vX.Y.Z`. It checks the tree is clean, the changelog entry exists, and lint and tests pass, then creates an annotated tag carrying that entry. It does not push.
+3. Run `git push origin vX.Y.Z`. CI builds the release archives and publishes the image as `vX.Y.Z` and `latest`.
+
+Prereleases (`vX.Y.Z-rc.N`, `-beta.N`, `-alpha.N`) go through the same steps but never move `latest`. `make release` and `make image-push` refuse any other version, so an untagged or dirty build cannot be published.
