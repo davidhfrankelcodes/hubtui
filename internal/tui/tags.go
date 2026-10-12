@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/davidhfrankelcodes/hubtui/internal/format"
 	"github.com/davidhfrankelcodes/hubtui/internal/hub"
 )
 
@@ -428,7 +429,9 @@ func (m *tagsScreen) rebuildKeeping(selected, selectedGroup string) {
 			return 0
 		})
 	case sortSize:
-		slices.SortStableFunc(m.visible, func(a, b int) int { return cmp.Compare(displaySize(m.all[b], m.arch), displaySize(m.all[a], m.arch)) })
+		slices.SortStableFunc(m.visible, func(a, b int) int {
+			return cmp.Compare(format.DisplaySize(m.all[b], m.arch), format.DisplaySize(m.all[a], m.arch))
+		})
 	}
 
 	now := m.deps.Now()
@@ -437,7 +440,7 @@ func (m *tagsScreen) rebuildKeeping(selected, selectedGroup string) {
 	cursor := 0
 	for r, i := range m.visible {
 		t := m.all[i]
-		rows[r] = table.Row{t.Name, archSummary(t.Platforms, archW), humanSize(displaySize(t, m.arch)), relativeTime(t.Pushed, now), shortDigest(t.Digest)}
+		rows[r] = table.Row{t.Name, format.Platforms(t.Platforms, archW), format.Size(format.DisplaySize(t, m.arch)), format.Ago(t.Pushed, now), format.ShortDigest(t.Digest)}
 		if t.Name == selected {
 			cursor = r
 		}
@@ -452,7 +455,7 @@ func (m *tagsScreen) setGroupRows(selected string) {
 	rows := make([]table.Row, len(m.groups))
 	cursor := 0
 	for r, g := range m.groups {
-		rows[r] = table.Row{g.key, strconv.Itoa(len(g.tags)), m.all[g.newest].Name, relativeTime(g.pushed, now)}
+		rows[r] = table.Row{g.key, strconv.Itoa(len(g.tags)), m.all[g.newest].Name, format.Ago(g.pushed, now)}
 		if g.key == selected {
 			cursor = r
 		}
@@ -626,7 +629,7 @@ func (m *tagsScreen) archOptions() []string {
 		}
 	}
 	slices.Sort(out)
-	sortPlatforms(out)
+	format.SortPlatforms(out)
 	return out
 }
 
@@ -652,7 +655,7 @@ func (m *tagsScreen) statusLine() string {
 		right = append(right, fmt.Sprintf("/%s/ %d match", m.filterRE, len(m.visible)))
 	}
 	if m.arch != "" {
-		right = append(right, "arch: "+shortPlatform(m.arch))
+		right = append(right, "arch: "+format.ShortPlatform(m.arch))
 	}
 	if m.stable {
 		right = append(right, "stable")

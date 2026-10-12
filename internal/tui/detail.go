@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/davidhfrankelcodes/hubtui/internal/format"
 	"github.com/davidhfrankelcodes/hubtui/internal/hub"
 )
 
@@ -91,7 +92,7 @@ func (d *detailScreen) infoLines() []string {
 	}
 	pushed := "-"
 	if !d.tag.Pushed.IsZero() {
-		pushed = relativeTime(d.tag.Pushed, d.deps.Now()) + " (" + d.tag.Pushed.UTC().Format("2006-01-02 15:04 MST") + ")"
+		pushed = format.Ago(d.tag.Pushed, d.deps.Now()) + " (" + d.tag.Pushed.UTC().Format("2006-01-02 15:04 MST") + ")"
 	}
 	w := max(d.width-9, 10)
 	return []string{
@@ -144,7 +145,7 @@ func (d *detailScreen) layout() {
 	rows := make([]table.Row, len(d.tag.Platforms))
 	for i, p := range d.tag.Platforms {
 		// Elide in the middle so a truncated digest still shows both ends.
-		rows[i] = table.Row{p.String(), elideMiddle(p.Digest, digestW), humanSize(p.Size)}
+		rows[i] = table.Row{p.String(), elideMiddle(p.Digest, digestW), format.Size(p.Size)}
 	}
 	d.table.SetRows(rows)
 	if len(rows) > 0 && d.table.Cursor() < 0 {

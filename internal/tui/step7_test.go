@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/davidhfrankelcodes/hubtui/internal/browser"
+	"github.com/davidhfrankelcodes/hubtui/internal/format"
 	"github.com/davidhfrankelcodes/hubtui/internal/hub"
 )
 
@@ -106,7 +107,7 @@ func TestTagsArchFilter(t *testing.T) {
 			t.Errorf("arch %q: size column %q, want the filtered platform's %q", s.arch, got, s.firstSize)
 		}
 		wantLabel := s.arch != ""
-		if got := strings.Contains(m.statusLine(), "arch: "+shortPlatform(s.arch)); got != wantLabel {
+		if got := strings.Contains(m.statusLine(), "arch: "+format.ShortPlatform(s.arch)); got != wantLabel {
 			t.Errorf("arch %q: status line %q", s.arch, m.statusLine())
 		}
 	}

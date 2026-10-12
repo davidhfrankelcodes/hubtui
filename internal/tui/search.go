@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/davidhfrankelcodes/hubtui/internal/format"
 	"github.com/davidhfrankelcodes/hubtui/internal/hub"
 )
 
@@ -319,8 +320,8 @@ func (s *searchScreen) rebuild() {
 		}
 		rows[i] = table.Row{
 			r.Repo.String(),
-			compactNumber(int64(r.Stars)),
-			compactNumber(r.Pulls),
+			format.Count(int64(r.Stars)),
+			format.Count(r.Pulls),
 			official,
 			strings.Join(strings.Fields(r.Description), " "),
 		}
