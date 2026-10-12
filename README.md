@@ -2,7 +2,7 @@
 
 Browse Docker Hub from your terminal: search repositories, filter a repository's tags by name and architecture, see per-platform digests and sizes, and copy a pinned image reference without opening a browser.
 
-![hubtui demo: searching for postgres, filtering tags by regex and architecture, opening a tag and copying its pinned reference](docs/demo.gif)
+![hubtui demo: searching for postgres, hiding unstable tags, grouping by major version, filtering one version to Alpine on arm64, opening a tag to see its platforms and aliases, copying its pinned reference, then listing tags as a table from the command line](docs/demo.gif)
 
 ## Why
 

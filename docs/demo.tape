@@ -29,25 +29,33 @@ Sleep 1s
 Enter
 Sleep 3s
 
-# Narrow to 17.x and 18.x Alpine releases with a regex, then to arm64.
+# Hide betas and release candidates, then group by major version. Grouping
+# loads every page, so give it time. g picks the newest major, whatever
+# that is on the day of recording.
+Type "u"
+Sleep 1.5s
+Type "v"
+Sleep 4s
+Type "g"
+Sleep 1s
+Enter
+Sleep 2s
+
+# Within that major, Alpine images on arm64.
 Type "/"
 Sleep 300ms
-Type "^1[78]\.[0-9]+-alpine$"
+Type "alpine$"
 Sleep 1.5s
 Enter
 Sleep 1s
 Type "a"
 Sleep 700ms
 Type "a"
-Sleep 1.5s
+Sleep 2s
 
-# Sort by name (17.9 before 17.10), then look inside the newest.
-Type "s"
-Sleep 1.5s
-Type "G"
-Sleep 1s
+# Look inside the newest: per-platform digests and the tags that alias it.
 Enter
-Sleep 2.5s
+Sleep 3s
 
 # Copy a pinned, multi-arch reference.
 Type "Y"
@@ -58,4 +66,10 @@ Sleep 3s
 Type "x"
 Sleep 500ms
 Type "q"
+Sleep 1s
+
+# The same data without the UI: a table by default, --json for scripts.
+Type "hubtui tags postgres --stable --limit 8"
 Sleep 500ms
+Enter
+Sleep 5s
