@@ -18,7 +18,7 @@ export GH_REPO
 
 # GH may be a multi-word command such as `go run .../gh@v2.102.0`.
 read -r -a gh_cmd <<<"${GH}"
-gh() { "${gh_cmd[@]}" "$@"; }
+run_gh() { "${gh_cmd[@]}" "$@"; }
 
 ASSETS=()
 NOTES=""
@@ -60,10 +60,10 @@ write_notes() {
 
 publish() {
 	echo "[3/4] Publishing release ${VERSION} to ${GH_REPO}"
-	if gh release view "${VERSION}" >/dev/null 2>&1; then
+	if run_gh release view "${VERSION}" >/dev/null 2>&1; then
 		echo "      exists; replacing its notes and assets"
-		gh release edit "${VERSION}" --notes "${NOTES}"
-		gh release upload "${VERSION}" "${ASSETS[@]}" --clobber
+		run_gh release edit "${VERSION}" --notes "${NOTES}"
+		run_gh release upload "${VERSION}" "${ASSETS[@]}" --clobber
 		return
 	fi
 	local flags=()
@@ -74,13 +74,13 @@ publish() {
 	# --verify-tag refuses to create the tag on the fly, so a release only
 	# ever names a tag that make tag created and someone pushed. The flags
 	# expansion tolerates an empty array under set -u on macOS's bash 3.2.
-	gh release create "${VERSION}" "${ASSETS[@]}" \
+	run_gh release create "${VERSION}" "${ASSETS[@]}" \
 		--verify-tag --title "hubtui ${VERSION}" --notes "${NOTES}" ${flags[@]+"${flags[@]}"}
 }
 
 report() {
 	echo "[4/4] Done"
-	gh release view "${VERSION}" --json url --jq .url
+	run_gh release view "${VERSION}" --json url --jq .url
 }
 
 main() {
