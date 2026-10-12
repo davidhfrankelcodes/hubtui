@@ -7,7 +7,19 @@ minor version may change key bindings, flags or the JSON output.
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-10-12
+## [0.1.1] - 2026-10-12
+
+### Fixed
+
+- Refreshing with `r` no longer moves the cursor onto a different tag when
+  tags were pushed since the last load.
+
+### Changed
+
+- Prerelease container images (`vX.Y.Z-rc.N` and similar) are published
+  under their own tag only and no longer update `latest`.
+
+## [0.1.0] - 2026-10-03
 
 First release.
 
@@ -35,5 +47,6 @@ First release.
 - Release archives for Linux and macOS on amd64 and arm64, and a multi-arch
   container image.
 
-[Unreleased]: https://github.com/davidhfrankelcodes/hubtui/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/davidhfrankelcodes/hubtui/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/davidhfrankelcodes/hubtui/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/davidhfrankelcodes/hubtui/releases/tag/v0.1.0
