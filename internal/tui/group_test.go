@@ -294,3 +294,152 @@ func TestTagsGroupingCursor(t *testing.T) {
 		t.Errorf("minor -> off: cursor %d, want the top", m.table.Cursor())
 	}
 }
+
+// r reloads from page 1, which replaces every tag; the open group and the
+// selected tag must survive that, including when the group has vanished.
+func TestTagsGroupingRefresh(t *testing.T) {
+	reg := &fakeRegistry{tags: versionTags("latest", "1.31.6", "1.31", "1.30.2", "2.0.1", "1.30"), pageSize: 100}
+	m := newTestModel(reg)
+	m = settle(t, m, m.init())
+	m, _ = press(t, m, "v", "v", "j", "enter", "j") // minor; open 1.31; cursor on 1.31
+
+	_, cmd := press(t, m, "r")
+	m = settle(t, m, cmd)
+	if m.openGroup != "1.31" || rowKeys(m) != "1.31.6,1.31" || selected(t, m) != "1.31" {
+		t.Fatalf("same tags: group %q, rows %s; want group and cursor kept", m.openGroup, rowKeys(m))
+	}
+
+	// A push since the last load lands above the cursor; the cursor follows
+	// the tag, not the row number, so a yank still names the tag on screen.
+	reg.tags = versionTags("1.31.7", "latest", "1.31.6", "1.31", "1.30.2", "2.0.1", "1.30")
+	_, cmd = press(t, m, "r")
+	m = settle(t, m, cmd)
+	if rowKeys(m) != "1.31.7,1.31.6,1.31" || selected(t, m) != "1.31" {
+		t.Fatalf("new tag: rows %s, selected %s", rowKeys(m), selected(t, m))
+	}
+	want := "nginx:1.31@" + reg.tags[3].Digest
+	if payload, _ := osc52Payload(runCmds(t, m.update(keyMsg("Y")))); payload != want {
+		t.Errorf("Y after refresh = %q, want %q", payload, want)
+	}
+
+	// The group can disappear upstream. It stays open and empty, like a
+	// filter that matches nothing, and must never yank some other tag.
+	reg.tags = versionTags("latest", "1.30.2", "2.0.1", "1.30")
+	_, cmd = press(t, m, "r")
+	m = settle(t, m, cmd)
+	if m.openGroup != "1.31" || len(m.table.Rows()) != 0 {
+		t.Fatalf("vanished group: group %q, rows %s", m.openGroup, rowKeys(m))
+	}
+	if _, ok := m.selected(); ok {
+		t.Error("a tag is selected in an empty group")
+	}
+	for _, k := range []string{"y", "Y", "p"} {
+		if payload, ok := osc52Payload(runCmds(t, m.update(keyMsg(k)))); ok {
+			t.Errorf("%s in an empty group copied %q", k, payload)
+		}
+	}
+	_ = m.view()
+
+	m, _ = press(t, m, "esc")
+	if m.openGroup != "" || rowKeys(m) != "2.0,1.30,other" {
+		t.Errorf("esc from vanished group: group %q, rows %s", m.openGroup, rowKeys(m))
+	}
+	if _, ok := m.selectedGroup(); !ok {
+		t.Error("no group selected after leaving a vanished group")
+	}
+}
+
+// pagedVersionTags returns tags served in pages of 4: the second page holds
+// 1.31.7, pushed after the first page was fetched, so it is the newest tag
+// even though it arrives last.
+func pagedVersionTags() []hub.Tag {
+	tags := versionTags("1.31.6", "1.30.2", "1.31.5", "latest", "1.31.7", "2.0.1", "1.31.4")
+	tags[4].Pushed = testNow().Add(time.Hour)
+	return tags
+}
+
+// A page that arrives while a group is open adds only that group's tags, and
+// the cursor stays on the tag it was on.
+func TestTagsGroupingPageArrivesInOpenGroup(t *testing.T) {
+	reg := &fakeRegistry{tags: pagedVersionTags(), pageSize: 4}
+	m := newTestModel(reg)
+	m, next := update(t, m, *pageMsg(t, m.init()))
+	page2 := pageMsg(t, next)
+	if page2 == nil || page2.page != 2 {
+		t.Fatalf("first page did not start loading the second: %+v", page2)
+	}
+
+	m, cmd := press(t, m, "v", "v", "enter") // minor; open 1.31, the first group
+	if cmd != nil {
+		t.Error("opening a group started a second fetch while one was in flight")
+	}
+	m, _ = press(t, m, "j")
+	if m.openGroup != "1.31" || rowKeys(m) != "1.31.6,1.31.5" || selected(t, m) != "1.31.5" {
+		t.Fatalf("before page 2: group %q, rows %s", m.openGroup, rowKeys(m))
+	}
+
+	m, cmd = update(t, m, *page2)
+	if rowKeys(m) != "1.31.7,1.31.6,1.31.5,1.31.4" {
+		t.Errorf("after page 2: rows %s, want only the 1.31 tags", rowKeys(m))
+	}
+	if got := selected(t, m); got != "1.31.5" {
+		t.Errorf("cursor moved to %s when page 2 arrived", got)
+	}
+	if cmd != nil || m.loading {
+		t.Error("fetched again after the last page")
+	}
+
+	m, _ = press(t, m, "esc")
+	if rowKeys(m) != "2.0,1.31,1.30,other" || m.table.Rows()[1][1] != "4" || m.table.Rows()[1][2] != "1.31.7" {
+		t.Errorf("group list after page 2: %v", m.table.Rows())
+	}
+}
+
+// A response requested before a refresh or before leaving the screen belongs
+// to a different listing and must not land in the open group.
+func TestTagsGroupingStaleResponsesDiscarded(t *testing.T) {
+	t.Run("refresh", func(t *testing.T) {
+		reg := &fakeRegistry{tags: pagedVersionTags(), pageSize: 4}
+		m := newTestModel(reg)
+		m, next := update(t, m, *pageMsg(t, m.init()))
+		stale := pageMsg(t, next)
+		staleCtx := reg.lastCall().ctx
+		m, _ = press(t, m, "v", "v", "enter")
+
+		reg.tags = versionTags("1.31.9", "1.31.8")
+		m, refresh := press(t, m, "r")
+		if staleCtx.Err() == nil {
+			t.Error("refresh did not cancel the page in flight")
+		}
+
+		m, _ = update(t, m, *stale)
+		if rowKeys(m) != "1.31.6,1.31.5" || !m.loading {
+			t.Fatalf("stale page 2 applied: rows %s, loading %v", rowKeys(m), m.loading)
+		}
+
+		m = settle(t, m, refresh)
+		if m.openGroup != "1.31" || rowKeys(m) != "1.31.9,1.31.8" || len(m.all) != 2 {
+			t.Errorf("after refresh: group %q, rows %s, %d tags", m.openGroup, rowKeys(m), len(m.all))
+		}
+	})
+
+	t.Run("navigate away", func(t *testing.T) {
+		reg := &fakeRegistry{tags: pagedVersionTags(), pageSize: 4}
+		m := newTestModel(reg)
+		m, next := update(t, m, *pageMsg(t, m.init()))
+		stale := pageMsg(t, next)
+		m, _ = press(t, m, "v", "v", "enter", "j")
+
+		// enter on a tag opens its detail; the app suspends this screen.
+		m.suspend()
+		m, _ = update(t, m, *stale)
+		if rowKeys(m) != "1.31.6,1.31.5" || len(m.all) != 4 {
+			t.Fatalf("page delivered after suspend was applied: rows %s", rowKeys(m))
+		}
+
+		m = settle(t, m, m.resume())
+		if m.openGroup != "1.31" || rowKeys(m) != "1.31.7,1.31.6,1.31.5,1.31.4" || selected(t, m) != "1.31.5" {
+			t.Errorf("after resume: group %q, rows %s", m.openGroup, rowKeys(m))
+		}
+	})
+}
