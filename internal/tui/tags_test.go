@@ -367,6 +367,25 @@ func TestTagsStaleResponsesDiscarded(t *testing.T) {
 	}
 }
 
+// A refresh replaces every tag; a tag pushed since the last load shifts the
+// rows, and the cursor must stay on the tag rather than the row number.
+func TestTagsRefreshKeepsSelectedTag(t *testing.T) {
+	reg := &fakeRegistry{tags: makeTags("t", 5), pageSize: 100}
+	m := newTestModel(reg)
+	m = settle(t, m, m.init())
+	m, _ = press(t, m, "j", "j")
+	if got := selected(t, m); got != "t2" {
+		t.Fatalf("selected %s, want t2", got)
+	}
+
+	reg.tags = append([]hub.Tag{{Name: "new", Pushed: testNow().Add(time.Hour)}}, reg.tags...)
+	_, cmd := press(t, m, "r")
+	m = settle(t, m, cmd)
+	if got := selected(t, m); got != "t2" {
+		t.Errorf("selected %s after refresh, want t2", got)
+	}
+}
+
 func TestTagsRefreshBypassesCache(t *testing.T) {
 	reg := &fakeRegistry{tags: makeTags("t", 10), pageSize: 100}
 	m := newTestModel(reg)

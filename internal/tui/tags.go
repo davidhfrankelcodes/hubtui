@@ -214,6 +214,9 @@ func (m *tagsScreen) handlePage(msg tagsPageMsg) tea.Cmd {
 		return nil
 	}
 
+	// Page 1 replaces every tag, so the selection has to be read while the
+	// table's indices still point into the old list.
+	selected, selectedGroup := m.selection()
 	if msg.page == 1 {
 		m.all, m.seen = nil, map[string]bool{}
 		m.bar.set("", false)
@@ -228,7 +231,7 @@ func (m *tagsScreen) handlePage(msg tagsPageMsg) tea.Cmd {
 	m.total = msg.res.Total
 	m.hasNext = msg.res.HasNext
 	m.nextPage = msg.page + 1
-	m.rebuild()
+	m.rebuildKeeping(selected, selectedGroup)
 	return m.maybeLoadMore()
 }
 
@@ -379,11 +382,20 @@ func (m *tagsScreen) clearFilter() {
 // rebuild recomputes the visible rows, keeping the same tag or group
 // selected.
 func (m *tagsScreen) rebuild() {
-	selected, selectedGroup := m.selectedName(), m.lastGroup
-	if g, ok := m.selectedGroup(); ok {
-		selectedGroup = g.key
-	}
+	m.rebuildKeeping(m.selection())
+}
 
+// selection returns the tag and group under the cursor, falling back to the
+// group last left.
+func (m *tagsScreen) selection() (tag, group string) {
+	tag, group = m.selectedName(), m.lastGroup
+	if g, ok := m.selectedGroup(); ok {
+		group = g.key
+	}
+	return tag, group
+}
+
+func (m *tagsScreen) rebuildKeeping(selected, selectedGroup string) {
 	m.visible = m.visible[:0]
 	for i, t := range m.all {
 		if (m.filterRE == nil || m.filterRE.MatchString(t.Name)) && (m.arch == "" || t.HasPlatform(m.arch)) && (!m.stable || !hub.IsPrerelease(t.Name)) &&
