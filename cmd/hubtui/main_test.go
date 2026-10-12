@@ -45,10 +45,12 @@ func (f *fakeRegistry) Tags(_ context.Context, repo hub.Repo, opts hub.TagsOptio
 	return &hub.TagPage{Tags: f.tagPages[i], Page: opts.Page, HasNext: i < len(f.tagPages)-1}, nil
 }
 
+func testNow() time.Time { return time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC) }
+
 func runApp(t *testing.T, reg hub.Registry, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
 	var out, errOut bytes.Buffer
-	a := &app{stdout: &out, stderr: &errOut, registry: reg, openTUI: func(context.Context, *hub.Repo) error {
+	a := &app{stdout: &out, stderr: &errOut, registry: reg, now: testNow, openTUI: func(context.Context, *hub.Repo) error {
 		t.Error("TUI started unexpectedly")
 		return nil
 	}}
@@ -137,11 +139,13 @@ func TestRunArgs(t *testing.T) {
 		{name: "two images", args: []string{"nginx", "redis"}, wantCode: 2, wantStderr: "Usage:"},
 		{name: "search help", args: []string{"search", "-h"}, wantCode: 0, wantStderr: "hubtui search <query>"},
 		{name: "search without query", args: []string{"search", "--json"}, wantCode: 2, wantStderr: "missing query"},
-		{name: "search without --json", args: []string{"search", "nginx"}, wantCode: 2, wantStderr: "--json is required"},
-		{name: "after -- flags are positional", args: []string{"search", "--", "--json"}, wantCode: 2, wantStderr: "--json is required"},
+		{name: "search with both formats", args: []string{"search", "nginx", "--table", "--json"}, wantCode: 2, wantStderr: "cannot be used together"},
+		// Parsed as a flag this would be "missing query"; reaching the
+		// unconfigured fake proves "--json" became the query.
+		{name: "after -- flags are positional", args: []string{"search", "--", "--json"}, wantCode: 1, wantStderr: "search not configured"},
 		{name: "tags without image", args: []string{"tags", "--json"}, wantCode: 2, wantStderr: "exactly one image"},
 		{name: "tags with two images", args: []string{"tags", "nginx", "redis", "--json"}, wantCode: 2, wantStderr: "exactly one image"},
-		{name: "tags without --json", args: []string{"tags", "nginx"}, wantCode: 2, wantStderr: "--json is required"},
+		{name: "tags with both formats", args: []string{"tags", "nginx", "--json", "--table"}, wantCode: 2, wantStderr: "cannot be used together"},
 		{name: "tags with a tag", args: []string{"tags", "nginx:latest", "--json"}, wantCode: 2, wantStderr: "without a tag or digest"},
 		{name: "tags negative limit", args: []string{"tags", "nginx", "--json", "--limit", "-1"}, wantCode: 2, wantStderr: "must not be negative"},
 		{name: "tags bad limit", args: []string{"tags", "nginx", "--json", "--limit", "x"}, wantCode: 2, wantStderr: "invalid value"},
@@ -444,7 +448,7 @@ func TestTagsEndToEnd(t *testing.T) {
 func TestUsageListsEveryForm(t *testing.T) {
 	_, _, stderr := runApp(t, &fakeRegistry{}, "-h")
 	block, _, _ := strings.Cut(stderr, "\n\n")
-	for _, form := range []string{"hubtui search <query> --json", "hubtui tags <image> --json", "hubtui <image>", "hubtui --version"} {
+	for _, form := range []string{"hubtui search <query> [--table | --json]", "hubtui tags <image> [--table | --json]", "hubtui <image>", "hubtui --version"} {
 		if !strings.Contains(block, form) {
 			t.Errorf("usage block lacks %q:\n%s", form, block)
 		}

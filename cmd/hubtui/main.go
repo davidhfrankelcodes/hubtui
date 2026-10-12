@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/davidhfrankelcodes/hubtui/internal/browser"
 	"github.com/davidhfrankelcodes/hubtui/internal/clip"
@@ -25,8 +26,8 @@ var version = "" //nolint:gochecknoglobals // the linker can only inject into pa
 const usage = `Usage:
   hubtui                          search Docker Hub interactively
   hubtui <image>                  browse an image's tags interactively
-  hubtui search <query> --json
-  hubtui tags <image> --json [--arch <arch>] [--limit <n>] [--stable]
+  hubtui search <query> [--table | --json]
+  hubtui tags <image> [--table | --json] [--arch <arch>] [--limit <n>] [--stable]
   hubtui --version
 
 Set DOCKERHUB_USERNAME and DOCKERHUB_TOKEN (a personal access token) to
@@ -40,11 +41,13 @@ const (
 	exitUsage = 2
 )
 
-// app holds what commands need, so tests can swap the registry, streams and
-// terminal.
+// app holds what commands need, so tests can swap the registry, streams,
+// clock and terminal.
 type app struct {
 	stdout, stderr io.Writer
 	registry       hub.Registry
+	// now dates the PUSHED column of the tags table.
+	now func() time.Time
 	// stdoutIsTTY gates the TUI: piped output gets usage, not escape codes.
 	stdoutIsTTY bool
 	// openTUI starts on the Tags screen for repo, or on Search when nil.
@@ -78,6 +81,7 @@ func mainCode() int {
 		stdout:      os.Stdout,
 		stderr:      os.Stderr,
 		registry:    client,
+		now:         time.Now,
 		stdoutIsTTY: isTerminal(os.Stdout),
 		openTUI: func(ctx context.Context, repo *hub.Repo) error {
 			return tui.Run(ctx, tui.Deps{
@@ -137,8 +141,8 @@ func isTerminal(f *os.File) bool {
 }
 
 func (a *app) runSearch(ctx context.Context, args []string) int {
-	fs := a.flagSet("search", "Usage: hubtui search <query> --json\n")
-	asJSON := fs.Bool("json", false, "print results as JSON (required)")
+	fs := a.flagSet("search", "Usage: hubtui search <query> [--table | --json]\n")
+	output := addOutputFlags(fs)
 	pos, code, ok := a.parse(fs, args)
 	if !ok {
 		return code
@@ -146,15 +150,24 @@ func (a *app) runSearch(ctx context.Context, args []string) int {
 	if len(pos) == 0 {
 		return a.usageError(fs, "search: missing query")
 	}
-	if !*asJSON {
-		return a.usageError(fs, "search: --json is required")
+	asJSON, err := output.json()
+	if err != nil {
+		return a.usageError(fs, "search: "+err.Error())
 	}
-	return a.searchJSON(ctx, strings.Join(pos, " "))
+
+	page, err := a.registry.Search(ctx, strings.Join(pos, " "), hub.PageOptions{})
+	if err != nil {
+		return a.fail(err)
+	}
+	if asJSON {
+		return a.searchJSON(page.Results)
+	}
+	return a.searchTable(page.Results)
 }
 
 func (a *app) runTags(ctx context.Context, args []string) int {
-	fs := a.flagSet("tags", "Usage: hubtui tags <image> --json [--arch <arch>] [--limit <n>] [--stable]\n")
-	asJSON := fs.Bool("json", false, "print tags as JSON (required)")
+	fs := a.flagSet("tags", "Usage: hubtui tags <image> [--table | --json] [--arch <arch>] [--limit <n>] [--stable]\n")
+	output := addOutputFlags(fs)
 	arch := fs.String("arch", "", "only tags with this platform: arm64, linux/arm64, arm/v7, ...")
 	limit := fs.Int("limit", 100, "maximum number of tags; 0 for all that Docker Hub will return")
 	stable := fs.Bool("stable", false, "leave out prereleases, dev builds and commit builds (rc, beta, nightly, ...)")
@@ -165,8 +178,9 @@ func (a *app) runTags(ctx context.Context, args []string) int {
 	if len(pos) != 1 {
 		return a.usageError(fs, "tags: expected exactly one image")
 	}
-	if !*asJSON {
-		return a.usageError(fs, "tags: --json is required")
+	asJSON, err := output.json()
+	if err != nil {
+		return a.usageError(fs, "tags: "+err.Error())
 	}
 	if *limit < 0 {
 		return a.usageError(fs, "tags: --limit must not be negative")
@@ -175,7 +189,40 @@ func (a *app) runTags(ctx context.Context, args []string) int {
 	if err != nil {
 		return a.usageError(fs, "tags: "+err.Error())
 	}
-	return a.tagsJSON(ctx, repo, tagFilter{arch: strings.ToLower(strings.TrimSpace(*arch)), stable: *stable}, *limit)
+	filter := tagFilter{arch: strings.ToLower(strings.TrimSpace(*arch)), stable: *stable}
+
+	tags, err := collectTags(ctx, a.registry, repo, filter, *limit)
+	switch {
+	case errors.Is(err, hub.ErrPageLimit):
+		// Partial results are still useful; say why the list stops short.
+		_, _ = fmt.Fprintf(a.stderr, "hubtui: warning: stopped after %d tags: %v\n", len(tags), err)
+	case err != nil:
+		return a.fail(err)
+	}
+	if asJSON {
+		return a.tagsJSON(repo, tags)
+	}
+	return a.tagsTable(tags, filter.arch)
+}
+
+// outputFlags are the --table and --json flags that search and tags share.
+type outputFlags struct {
+	table, asJSON *bool
+}
+
+func addOutputFlags(fs *flag.FlagSet) outputFlags {
+	return outputFlags{
+		table:  fs.Bool("table", false, "print a table for reading (the default)"),
+		asJSON: fs.Bool("json", false, "print JSON for scripts"),
+	}
+}
+
+// json reports whether JSON was asked for; a table is the default.
+func (o outputFlags) json() (bool, error) {
+	if *o.table && *o.asJSON {
+		return false, errors.New("--table and --json cannot be used together")
+	}
+	return *o.asJSON, nil
 }
 
 func (a *app) flagSet(name, synopsis string) *flag.FlagSet {

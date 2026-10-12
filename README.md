@@ -71,12 +71,21 @@ Copies go out as an OSC 52 escape sequence, which reaches your local clipboard e
 
 ## Scripting
 
-`search` and `tags` print JSON and never start the UI. Errors go to stderr with a non-zero exit code.
+`search` and `tags` print results and exit without starting the UI. They print a table by default (`--table`) and JSON with `--json`. Errors go to stderr with a non-zero exit code.
 
 ```sh
-hubtui search <query> --json
-hubtui tags <image> --json [--arch <arch>] [--limit <n>] [--stable]
+hubtui search <query> [--table | --json]
+hubtui tags <image> [--table | --json] [--arch <arch>] [--limit <n>] [--stable]
 ```
+
+```
+$ hubtui tags nginx --limit 2
+TAG                  PLATFORMS                              SIZE      PUSHED   DIGEST
+stable-trixie-perl   amd64,arm64/v8,arm/v7,386,ppc64le,+3   75.8 MB   4d ago   9e81d98c45ae
+stable-perl          amd64,arm64/v8,arm/v7,386,ppc64le,+3   75.8 MB   4d ago   9e81d98c45ae
+```
+
+The table is for reading and its layout may change; scripts should use `--json`.
 
 Tags come newest first. `--limit` defaults to 100; `0` means everything Docker Hub will return. `--arch` accepts `arm64`, `linux/arm64`, `arm/v7` and similar, and keeps the tags that have that platform. `--stable` leaves out the same tags as `u`.
 

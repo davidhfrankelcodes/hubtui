@@ -7,6 +7,12 @@ minor version may change key bindings, flags or the JSON output.
 
 ## [Unreleased]
 
+### Changed
+
+- `hubtui search` and `hubtui tags` print a table by default instead of
+  failing without `--json`. `--json` prints JSON as before; `--table` asks
+  for the table explicitly.
+
 ### Added
 
 - Releases are published on GitHub with the archives, `SHA256SUMS` and the

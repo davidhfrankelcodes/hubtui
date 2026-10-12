@@ -48,6 +48,7 @@ Run `make lint test` before declaring any task done. CI calls these same make ta
 cmd/hubtui/        main.go: flag parsing, wiring only
 internal/hub/      Docker Hub API client and types. No TUI imports.
 internal/tui/      Bubble Tea models, one file per screen
+internal/format/   Display formatting shared by the TUI and the CLI tables
 internal/clip/     Clipboard (OSC 52 first, native fallback)
 internal/browser/  Opening Docker Hub pages in the user's browser
 internal/config/   Env and flag resolution
@@ -114,11 +115,11 @@ Yanking shows a one-line confirmation in the status bar with exactly what was co
 ## Non-interactive mode
 
 ```
-hubtui search <query> --json
-hubtui tags <image> --json [--arch <arch>] [--limit <n>] [--stable]
+hubtui search <query> [--table | --json]
+hubtui tags <image> [--table | --json] [--arch <arch>] [--limit <n>] [--stable]
 ```
 
-Prints JSON to stdout and exits. No TUI, no color, errors to stderr with a non-zero exit code. If stdout is not a TTY and no subcommand is given, print usage instead of starting the TUI.
+Prints a table (the default, `--table`) or JSON (`--json`) to stdout and exits; passing both is a usage error. The JSON shape is a stable interface for scripts; the table is for people and may change. Tables use `internal/format`, the same helpers as the TUI, so both show sizes, times and digests identically. No TUI, no color, errors to stderr with a non-zero exit code. If stdout is not a TTY and no subcommand is given, print usage instead of starting the TUI.
 
 ## Conventions
 

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -44,13 +43,9 @@ type platformJSON struct {
 	Size         int64  `json:"size"`
 }
 
-func (a *app) searchJSON(ctx context.Context, query string) int {
-	page, err := a.registry.Search(ctx, query, hub.PageOptions{})
-	if err != nil {
-		return a.fail(err)
-	}
-	out := make([]searchResultJSON, 0, len(page.Results))
-	for _, r := range page.Results {
+func (a *app) searchJSON(results []hub.SearchResult) int {
+	out := make([]searchResultJSON, 0, len(results))
+	for _, r := range results {
 		out = append(out, searchResultJSON{
 			Name:        r.Repo.String(),
 			Namespace:   r.Repo.Namespace,
@@ -76,16 +71,7 @@ func (f tagFilter) keep(t hub.Tag) bool {
 	return (f.arch == "" || t.HasPlatform(f.arch)) && (!f.stable || !hub.IsPrerelease(t.Name))
 }
 
-func (a *app) tagsJSON(ctx context.Context, repo hub.Repo, filter tagFilter, limit int) int {
-	tags, err := collectTags(ctx, a.registry, repo, filter, limit)
-	switch {
-	case errors.Is(err, hub.ErrPageLimit):
-		// Partial results are still useful; say why the list stops short.
-		_, _ = fmt.Fprintf(a.stderr, "hubtui: warning: stopped after %d tags: %v\n", len(tags), err)
-	case err != nil:
-		return a.fail(err)
-	}
-
+func (a *app) tagsJSON(repo hub.Repo, tags []hub.Tag) int {
 	out := make([]tagJSON, 0, len(tags))
 	for _, t := range tags {
 		ref, err := hub.Reference(repo, t.Name)
