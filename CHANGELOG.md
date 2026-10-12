@@ -7,6 +7,11 @@ minor version may change key bindings, flags or the JSON output.
 
 ## [Unreleased]
 
+### Added
+
+- Releases are published on GitHub with the archives, `SHA256SUMS` and the
+  changelog entry as notes.
+
 ## [0.1.1] - 2026-10-12
 
 ### Fixed

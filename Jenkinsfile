@@ -53,6 +53,17 @@ pipeline {
                         archiveArtifacts artifacts: 'dist/*.tar.gz, dist/SHA256SUMS', fingerprint: true
                     }
                 }
+                stage('GitHub release') {
+                    when { buildingTag() }
+                    steps {
+                        // Credentials ID is an assumption: a GitHub token
+                        // (fine-grained, Contents: read and write on this
+                        // repository) stored as a secret text credential.
+                        withCredentials([string(credentialsId: 'github-release-token', variable: 'GH_TOKEN')]) {
+                            sh 'make gh-release VERSION="$TAG_NAME"'
+                        }
+                    }
+                }
             }
         }
 

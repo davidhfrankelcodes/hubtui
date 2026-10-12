@@ -10,6 +10,13 @@ RELEASE_VERSION_RE := ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$$
 # Prereleases are published under their own tag but never move latest.
 LATEST_TAG = $(if $(findstring -,$(VERSION)),,-t $(IMAGE):latest)
 
+# GitHub releases. gh is run at a pinned version through go run, so CI needs
+# nothing beyond Go and the project's go.mod is untouched; set GH=gh to use
+# an installed copy instead.
+GH_VERSION ?= v2.102.0
+GH         ?= go run github.com/cli/cli/v2/cmd/gh@$(GH_VERSION)
+GH_REPO    ?= davidhfrankelcodes/hubtui
+
 # Container image. PLATFORMS is what `make image` and `make image-push` build.
 IMAGE     ?= docker.io/davidhfrankelcodes/hubtui
 PLATFORMS ?= linux/amd64,linux/arm64
@@ -19,7 +26,7 @@ export CGO_ENABLED := 0
 # VHS renders the README demo; its image bundles ttyd, ffmpeg and a browser.
 VHS_IMAGE := ghcr.io/charmbracelet/vhs:v0.12.1@sha256:ea49a6a1c529be83153e88321892b5585964418f0b9055e8c1e0d732194234a3
 
-.PHONY: build run test lint fmt clean check-version release tag image image-push demo
+.PHONY: build run test lint fmt clean check-version release gh-release tag image image-push demo
 
 build:
 	go build -trimpath -ldflags '$(LDFLAGS)' -o $(BIN) $(PKG)
@@ -45,6 +52,11 @@ check-version:
 # Archives for linux and darwin on amd64 and arm64, plus SHA256SUMS, in dist/.
 release: check-version
 	VERSION='$(VERSION)' LDFLAGS='$(LDFLAGS)' ./scripts/release.sh
+
+# Publishes dist/ from `make release` as the GitHub release for VERSION, with
+# its CHANGELOG.md entry as the notes. Needs GH_TOKEN or a gh login.
+gh-release: check-version
+	VERSION='$(VERSION)' GH='$(GH)' GH_REPO='$(GH_REPO)' IMAGE='$(IMAGE)' ./scripts/gh-release.sh
 
 # Tags HEAD of main as TAG after checking CHANGELOG.md and running lint and
 # tests. Does not push; see scripts/tag.sh.

@@ -37,18 +37,8 @@ check_repo() {
 	fi
 }
 
-# changelog_entry prints the body of the version's section, without its
-# heading, up to the next section or the link definitions.
 changelog_entry() {
-	# Blank lines are held back until more text follows, which trims them
-	# from both ends.
-	awk -v heading="## [${VERSION}] - " '
-		index($0, heading) == 1 { found = 1; next }
-		found && (/^## \[/ || /^\[[^]]+\]: /) { exit }
-		!found { next }
-		/^$/ { if (started) blanks++; next }
-		{ while (blanks > 0) { print ""; blanks-- } print; started = 1 }
-	' "${CHANGELOG}"
+	./scripts/changelog.sh "${VERSION}" "${CHANGELOG}"
 }
 
 check_changelog() {

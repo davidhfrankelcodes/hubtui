@@ -18,7 +18,7 @@ go install github.com/davidhfrankelcodes/hubtui/cmd/hubtui@latest
 
 Or clone and `make build`, which writes `./bin/hubtui`.
 
-Release archives for Linux and macOS on amd64 and arm64, with `SHA256SUMS`, are built for each release. A multi-arch container image is published alongside them:
+Each [GitHub release](https://github.com/davidhfrankelcodes/hubtui/releases) has archives for Linux and macOS on amd64 and arm64, with `SHA256SUMS`. A multi-arch container image is published alongside them:
 
 ```sh
 docker run -it --rm docker.io/davidhfrankelcodes/hubtui nginx
@@ -129,6 +129,7 @@ make lint      # golangci-lint run
 make fmt       # gofmt + goimports
 make release   # dist/ archives and SHA256SUMS (tagged versions only)
 make tag TAG=v0.2.0  # create a release tag; see Releasing
+make gh-release VERSION=v0.2.0  # publish dist/ as a GitHub release
 make image     # multi-arch container image
 make demo      # re-record docs/demo.gif from docs/demo.tape (needs Docker)
 ```
@@ -141,6 +142,6 @@ Versions follow [Semantic Versioning](https://semver.org/); changes are recorded
 
 1. Move the notes under `## [Unreleased]` in `CHANGELOG.md` to a new `## [X.Y.Z] - YYYY-MM-DD` section, update the links at the bottom, and commit on `main`.
 2. Run `make tag TAG=vX.Y.Z`. It checks the tree is clean, the changelog entry exists, and lint and tests pass, then creates an annotated tag carrying that entry. It does not push.
-3. Run `git push origin vX.Y.Z`. CI builds the release archives and publishes the image as `vX.Y.Z` and `latest`.
+3. Run `git push origin vX.Y.Z`. CI builds the release archives, publishes them as a GitHub release with the changelog entry as its notes (`make gh-release`), and publishes the image as `vX.Y.Z` and `latest`.
 
-Prereleases (`vX.Y.Z-rc.N`, `-beta.N`, `-alpha.N`) go through the same steps but never move `latest`. `make release` and `make image-push` refuse any other version, so an untagged or dirty build cannot be published.
+Prereleases (`vX.Y.Z-rc.N`, `-beta.N`, `-alpha.N`) go through the same steps but never move `latest` or become the latest GitHub release. `make release` and `make image-push` refuse any other version, so an untagged or dirty build cannot be published.
