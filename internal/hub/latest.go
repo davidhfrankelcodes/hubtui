@@ -27,8 +27,8 @@ type LineResult struct {
 	Partial bool
 }
 
-// LatestInLine finds the newest tag that could replace from: same variant,
-// same number of version parts, and the same major version unless
+// LatestInLine finds the newest pinnable tag that could replace from: same
+// variant, same precision, and the same major version unless
 // opts.CrossMajor (see TagName.SameLine). from itself counts, so the answer
 // is from when nothing newer exists.
 func LatestInLine(ctx context.Context, reg Registry, repo Repo, from string, opts LineOptions) (LineResult, error) {
@@ -39,7 +39,7 @@ func LatestInLine(ctx context.Context, reg Registry, repo Repo, from string, opt
 
 	// A one-part release such as 17-alpine is the only member of its line
 	// within its major, so one lookup answers it.
-	if len(base.Version) == 1 && base.Pre == "" && !opts.CrossMajor {
+	if len(base.Version) == 1 && base.Build == 0 && base.Pre == "" && !opts.CrossMajor {
 		t, err := reg.Tag(ctx, repo, from)
 		if err != nil {
 			return LineResult{}, err
@@ -51,10 +51,11 @@ func LatestInLine(ctx context.Context, reg Registry, repo Repo, from string, opt
 	}
 
 	var (
-		best    Tag
-		bestTN  TagName
-		found   bool
-		partial bool
+		best       Tag
+		bestTN     TagName
+		found      bool
+		partial    bool
+		unpinnable bool
 	)
 	filter := lineFilter(base, opts.CrossMajor)
 	for page := 1; ; page++ {
@@ -71,6 +72,12 @@ func LatestInLine(ctx context.Context, reg Registry, repo Repo, from string, opt
 			if !base.SameLine(tn, opts.CrossMajor) || (opts.Platform != "" && !t.HasPlatform(opts.Platform)) {
 				continue
 			}
+			// An unpinnable tag (legacy, no digest) is no answer for resolve,
+			// so the newest pinnable one wins instead.
+			if !pinnable(t) {
+				unpinnable = true
+				continue
+			}
 			// Ties keep the first seen, which is the most recently pushed.
 			if !found || tn.Compare(bestTN) > 0 {
 				best, bestTN, found = t, tn, true
@@ -79,6 +86,12 @@ func LatestInLine(ctx context.Context, reg Registry, repo Repo, from string, opt
 		if !p.HasNext || len(p.Tags) == 0 {
 			break
 		}
+	}
+	if !found && partial {
+		return LineResult{}, fmt.Errorf("no tag in the line of %s:%s before paging stopped: %w", repo, from, ErrPageLimit)
+	}
+	if !found && unpinnable {
+		return LineResult{}, fmt.Errorf("the line of %s:%s has only legacy tags: %w", repo, from, ErrNoDigest)
 	}
 	if !found {
 		what := "no tag"
@@ -110,4 +123,9 @@ func lineFilter(base TagName, crossMajor bool) string {
 		return base.Variant
 	}
 	return ""
+}
+
+// pinnable reports whether PinnedReference can pin t.
+func pinnable(t Tag) bool {
+	return digestRE.MatchString(t.Digest) && !isSchema1(t.MediaType)
 }

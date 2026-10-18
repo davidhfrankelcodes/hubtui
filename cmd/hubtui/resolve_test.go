@@ -123,3 +123,69 @@ func TestResolveLatestPartial(t *testing.T) {
 		t.Errorf("code %d, stdout %q, stderr %q", code, stdout, stderr)
 	}
 }
+
+// resolve --json is documented as the tags --json shape; it must be the
+// very object tags prints for that tag, not a lookalike.
+func TestResolveJSONMatchesTags(t *testing.T) {
+	_, tagsOut, _ := runApp(t, resolveFixture(), "tags", "postgres", "--json")
+	var all []map[string]any
+	if err := json.Unmarshal([]byte(tagsOut), &all); err != nil {
+		t.Fatal(err)
+	}
+	var want map[string]any
+	for _, tj := range all {
+		if tj["name"] == "17.11-alpine" {
+			want = tj
+		}
+	}
+	_, out, stderr := runApp(t, resolveFixture(), "resolve", "postgres:17.11-alpine", "--json")
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("%v: %s %s", err, out, stderr)
+	}
+	if want == nil || fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("resolve --json = %v\ntags --json has %v", got, want)
+	}
+}
+
+func TestResolveMore(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		want       string
+		wantStderr string // "" means stderr must be empty
+	}{
+		// Checking a pinned Dockerfile line with --latest: still the newest
+		// tag, but rebuilt, so the pin changes and that is worth a note.
+		{name: "latest on a moved pin", args: []string{"postgres:17.11-alpine@" + digestFor(99), "--latest"}, want: "postgres:17.11-alpine@" + digestFor(3), wantStderr: "has moved from"},
+		// Moving to a newer tag is the point of --latest, not a moved tag.
+		{name: "latest moving on is silent", args: []string{"postgres:17.4-alpine@" + digestFor(6), "--latest"}, want: "postgres:17.11-alpine@" + digestFor(3)},
+		{name: "arch is normalized", args: []string{"postgres:17.4-alpine", "--latest", "--arch", " ARM64 "}, want: "postgres:17.10-alpine@" + digestFor(4)},
+		{name: "arch with variant", args: []string{"postgres:17-alpine", "--arch", "linux/arm64/v8"}, want: "postgres:17-alpine@" + digestFor(5)},
+		{name: "underscore namespace", args: []string{"_/postgres:17-alpine"}, want: "postgres:17-alpine@" + digestFor(5)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code, stdout, stderr := runApp(t, resolveFixture(), append([]string{"resolve"}, tt.args...)...)
+			if code != 0 || stdout != tt.want+"\n" {
+				t.Errorf("exit %d, stdout %q, want %q; stderr %s", code, stdout, tt.want+"\n", stderr)
+			}
+			if (tt.wantStderr == "") != (stderr == "") || !strings.Contains(stderr, tt.wantStderr) {
+				t.Errorf("stderr = %q, want %q", stderr, tt.wantStderr)
+			}
+		})
+	}
+}
+
+// Stopped by the cap before any candidate: an error that says why, not a
+// claim that the line does not exist.
+func TestResolveLatestCappedEmpty(t *testing.T) {
+	reg := &fakeRegistry{
+		tagPages: [][]hub.Tag{{{Name: "latest", Digest: digestFor(0)}}, nil},
+		errs:     map[int]error{2: fmt.Errorf("listing tags: %w", hub.ErrPageLimit)},
+	}
+	code, stdout, stderr := runApp(t, reg, "resolve", "postgres:17.4-alpine", "--latest")
+	if code != 1 || stdout != "" || !strings.Contains(stderr, "before paging stopped") || !strings.Contains(stderr, "signing in") {
+		t.Errorf("code %d, stdout %q, stderr %q", code, stdout, stderr)
+	}
+}

@@ -138,15 +138,17 @@ func (t TagName) Compare(o TagName) int {
 }
 
 // SameLine reports whether o could replace t in a version line: same
-// variant, same number of version parts (17.4 moves to 17.11, not 17.11.1),
-// the same major version unless crossMajor, and a release unless t is
-// itself a prerelease.
+// variant, same precision (17.4 moves to 17.11, not 17.11.1, and 27 not to
+// the build 27_35), the same major version unless crossMajor, and a release
+// unless o is a later prerelease of t's own version (18beta3 to 18rc1, but
+// 3.14.0rc1 never to 3.15.0a1).
 func (t TagName) SameLine(o TagName, crossMajor bool) bool {
 	return t.HasVersion() && o.HasVersion() &&
 		o.Variant == t.Variant &&
 		len(o.Version) == len(t.Version) &&
+		(o.Build == 0) == (t.Build == 0) &&
 		(crossMajor || o.Version[0] == t.Version[0]) &&
-		(t.Pre != "" || o.Pre == "")
+		(o.Pre == "" || t.Pre != "" && slices.Equal(o.Version, t.Version) && o.Build == t.Build)
 }
 
 // isPrereleaseSegment reports whether one "-"-separated part of a tag marks

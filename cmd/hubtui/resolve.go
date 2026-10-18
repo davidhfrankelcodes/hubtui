@@ -81,6 +81,9 @@ func (a *app) resolveTag(ctx context.Context, ref hub.ImageRef, platform string,
 		if errors.Is(err, hub.ErrNoVersion) {
 			return hub.Tag{}, fmt.Errorf("%w; --latest needs a versioned tag such as %s:17-alpine", err, ref.Repo)
 		}
+		if errors.Is(err, hub.ErrPageLimit) {
+			return hub.Tag{}, fmt.Errorf("%w (signing in lifts the limit)", err)
+		}
 		if err != nil {
 			return hub.Tag{}, err
 		}

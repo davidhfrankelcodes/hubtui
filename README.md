@@ -97,7 +97,7 @@ $ hubtui resolve postgres:17.4-alpine --latest
 postgres:17.11-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
 ```
 
-`--latest` finds the newest tag in the same version line: the same variant (`alpine` stays `alpine`, never `alpine3.24`), the same number of version parts (`17.4` moves to `17.11`, not `17.11.1`), the same major version, and no betas or release candidates unless you started from one. `--major` lets the major version move too (`17-alpine` to `18-alpine`). A tag without a version, such as `latest`, cannot be compared. Given a pinned reference whose tag has since moved, `resolve` prints the new pin and notes the change on stderr.
+`--latest` finds the newest tag in the same version line: the same variant (`alpine` stays `alpine`, never `alpine3.24`), the same number of version parts (`17.4` moves to `17.11`, not `17.11.1`), the same major version, and no betas or release candidates unless you started from one, and then only later ones of the same version (`3.14.0rc1` moves to `3.14.0rc2` or `3.14.2`, never `3.15.0a1`). Tags that cannot be pinned, such as legacy ones without a digest, are skipped. `--major` lets the major version move too (`17-alpine` to `18-alpine`). A tag without a version, such as `latest`, cannot be compared. Given a pinned reference whose tag has since moved, `resolve` prints the new pin and notes the change on stderr.
 
 Tags come newest first. `--limit` defaults to 100; `0` means everything Docker Hub will return. `--arch` accepts `arm64`, `linux/arm64`, `arm/v7` and similar, and keeps the tags that have that platform. `--stable` leaves out the same tags as `u`.
 

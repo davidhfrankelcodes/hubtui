@@ -111,6 +111,13 @@ func TestTagNameSameLine(t *testing.T) {
 		{"17.4-alpine", "17.5rc1-alpine", false, false}, // a release never moves to a prerelease
 		{"18beta3-alpine", "18rc1-alpine", false, true}, // a prerelease may move on
 		{"18beta3-alpine", "18-alpine", false, true},
+		{"3.14.0rc1", "3.14.0rc2", false, true},
+		{"3.14.0rc1", "3.14.2", false, true},
+		{"3.14.0rc1", "3.15.0a1", false, false},        // not a prerelease of another version
+		{"3.14.0rc1", "4.0.0a1", true, false},          // nor across majors
+		{"27-jdk", "27_35-jdk", false, false},          // a build is more precise
+		{"21.0.4_7-jdk", "21.0.5_11-jdk", false, true}, // builds move to builds
+		{"21.0.4_7-jdk", "21.0.5-jdk", false, false},
 		{"latest", "latest", false, false},
 		{"17.4", "latest", true, false},
 	}
