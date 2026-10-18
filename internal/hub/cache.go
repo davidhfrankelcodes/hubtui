@@ -34,6 +34,7 @@ type searchKey struct {
 type tagsKey struct {
 	repo           Repo
 	order          TagOrder
+	name           string
 	page, pageSize int
 }
 
@@ -86,7 +87,7 @@ func (c *Cache) Search(ctx context.Context, query string, opts PageOptions) (*Se
 // Tags implements Registry.
 func (c *Cache) Tags(ctx context.Context, repo Repo, opts TagsOptions) (*TagPage, error) {
 	page, size := opts.normalize()
-	key := tagsKey{repo: repo, order: opts.Order, page: page, pageSize: size}
+	key := tagsKey{repo: repo, order: opts.Order, name: opts.Name, page: page, pageSize: size}
 
 	c.mu.Lock()
 	if opts.Fresh {
@@ -109,4 +110,10 @@ func (c *Cache) Tags(ctx context.Context, repo Repo, opts TagsOptions) (*TagPage
 	c.tags[key] = cacheEntry[*TagPage]{value: res, expires: c.now().Add(c.ttl)}
 	c.mu.Unlock()
 	return res, nil
+}
+
+// Tag implements Registry. It is not cached: resolving a tag is a question
+// about what it points at now, and nothing asks for the same tag twice.
+func (c *Cache) Tag(ctx context.Context, repo Repo, name string) (*Tag, error) {
+	return c.next.Tag(ctx, repo, name)
 }

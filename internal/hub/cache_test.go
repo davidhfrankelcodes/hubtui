@@ -8,8 +8,8 @@ import (
 )
 
 type countingRegistry struct {
-	searches, tags int
-	err            error
+	searches, tags, tag int
+	err                 error
 }
 
 func (r *countingRegistry) Search(context.Context, string, PageOptions) (*SearchPage, error) {
@@ -23,6 +23,11 @@ func (r *countingRegistry) Tags(_ context.Context, _ Repo, opts TagsOptions) (*T
 		return nil, r.err
 	}
 	return &TagPage{Page: opts.Page, Total: r.tags}, nil
+}
+
+func (r *countingRegistry) Tag(_ context.Context, _ Repo, name string) (*Tag, error) {
+	r.tag++
+	return &Tag{Name: name}, r.err
 }
 
 func TestCacheTags(t *testing.T) {

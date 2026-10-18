@@ -33,6 +33,8 @@ const (
 type Registry interface {
 	Search(ctx context.Context, query string, opts PageOptions) (*SearchPage, error)
 	Tags(ctx context.Context, repo Repo, opts TagsOptions) (*TagPage, error)
+	// Tag fetches one tag by name; a missing tag or repository is ErrNotFound.
+	Tag(ctx context.Context, repo Repo, name string) (*Tag, error)
 }
 
 // PageOptions selects a page. Page is 1-based; zero values mean page 1 at
@@ -78,6 +80,10 @@ func (o TagOrder) param() string {
 type TagsOptions struct {
 	PageOptions
 	Order TagOrder
+	// Name keeps only tags whose name contains it. Hub matches substrings,
+	// case-sensitively, and the filter reaches tags past the anonymous
+	// paging cap, so a narrow filter can find old version lines.
+	Name string
 }
 
 // defaultRateLimitWait applies when a 429 carries no hint, so callers still
@@ -200,11 +206,15 @@ func (c *Client) Tags(ctx context.Context, repo Repo, opts TagsOptions) (*TagPag
 	page, size := opts.normalize()
 
 	u := c.baseURL.JoinPath("v2", "namespaces", repo.Namespace, "repositories", repo.Name, "tags")
-	u.RawQuery = url.Values{
+	q := url.Values{
 		"page":      {strconv.Itoa(page)},
 		"page_size": {strconv.Itoa(size)},
 		"ordering":  {opts.Order.param()},
-	}.Encode()
+	}
+	if opts.Name != "" {
+		q.Set("name", opts.Name)
+	}
+	u.RawQuery = q.Encode()
 
 	var raw tagsResponse
 	if err := c.get(ctx, u, &raw); err != nil {
@@ -213,32 +223,29 @@ func (c *Client) Tags(ctx context.Context, repo Repo, opts TagsOptions) (*TagPag
 
 	out := &TagPage{Total: raw.Count, Page: page, HasNext: raw.Next != ""}
 	for _, r := range raw.Results {
-		t := Tag{
-			Name:      r.Name,
-			Digest:    r.Digest,
-			MediaType: r.MediaType,
-			Pushed:    r.TagLastPushed,
-		}
-		if t.Pushed.IsZero() {
-			t.Pushed = r.LastUpdated
-		}
-		for _, img := range r.Images {
-			// Build attestations (provenance, SBOM) ride along in the index
-			// as unknown/unknown; they are not runnable platforms.
-			if img.OS == "unknown" && img.Architecture == "unknown" {
-				continue
-			}
-			t.Platforms = append(t.Platforms, Platform{
-				OS:      img.OS,
-				Arch:    img.Architecture,
-				Variant: img.Variant,
-				Digest:  img.Digest,
-				Size:    img.Size,
-			})
-		}
-		out.Tags = append(out.Tags, t)
+		out.Tags = append(out.Tags, r.tag())
 	}
 	return out, nil
+}
+
+// Tag implements Registry.
+func (c *Client) Tag(ctx context.Context, repo Repo, name string) (*Tag, error) {
+	// The name becomes a path segment; refuse anything that is not a valid
+	// tag rather than let it address some other endpoint.
+	if !tagRE.MatchString(name) {
+		return nil, fmt.Errorf("invalid tag %q", name)
+	}
+	u := c.baseURL.JoinPath("v2", "namespaces", repo.Namespace, "repositories", repo.Name, "tags", name)
+
+	var raw wireTag
+	if err := c.get(ctx, u, &raw); err != nil {
+		return nil, fmt.Errorf("getting %s:%s: %w", repo, name, err)
+	}
+	if raw.Name != name {
+		return nil, fmt.Errorf("getting %s:%s: docker hub answered for tag %q", repo, name, raw.Name)
+	}
+	t := raw.tag()
+	return &t, nil
 }
 
 func (c *Client) get(ctx context.Context, u *url.URL, out any) error {

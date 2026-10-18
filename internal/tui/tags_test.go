@@ -90,6 +90,17 @@ func (f *fakeRegistry) Tags(ctx context.Context, _ hub.Repo, opts hub.TagsOption
 	}, nil
 }
 
+func (f *fakeRegistry) Tag(_ context.Context, _ hub.Repo, name string) (*hub.Tag, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, t := range f.tags {
+		if t.Name == name {
+			return &t, nil
+		}
+	}
+	return nil, hub.ErrNotFound
+}
+
 func (f *fakeRegistry) numCalls() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()

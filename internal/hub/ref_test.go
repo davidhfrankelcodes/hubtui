@@ -151,3 +151,44 @@ func TestPinnedReference(t *testing.T) {
 		})
 	}
 }
+
+func TestParseReference(t *testing.T) {
+	const digest = "sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24"
+	postgres := Repo{"library", "postgres"}
+	tests := []struct {
+		in      string
+		want    ImageRef
+		wantErr string
+	}{
+		{in: "postgres", want: ImageRef{Repo: postgres}},
+		{in: "postgres:17-alpine", want: ImageRef{Repo: postgres, Tag: "17-alpine"}},
+		{in: "  postgres:17  ", want: ImageRef{Repo: postgres, Tag: "17"}},
+		{in: "postgres:17-alpine@" + digest, want: ImageRef{Repo: postgres, Tag: "17-alpine", Digest: digest}},
+		{in: "postgres@" + digest, want: ImageRef{Repo: postgres, Digest: digest}},
+		{in: "library/postgres:17", want: ImageRef{Repo: postgres, Tag: "17"}},
+		{in: "docker.io/library/postgres:17", want: ImageRef{Repo: postgres, Tag: "17"}},
+		{in: "grafana/grafana:11.0.0", want: ImageRef{Repo: Repo{"grafana", "grafana"}, Tag: "11.0.0"}},
+
+		{in: "postgres:", wantErr: "invalid tag"},
+		{in: "postgres:17/alpine", wantErr: "only Docker Hub"},
+		{in: "postgres:-17", wantErr: "invalid tag"},
+		{in: "postgres@sha256:abc", wantErr: "invalid digest"},
+		{in: "postgres:17@", wantErr: "invalid digest"},
+		{in: "ghcr.io/owner/app:1", wantErr: "only Docker Hub"},
+		{in: "localhost:5000/app:1", wantErr: "only Docker Hub"},
+		{in: "Postgres:17", wantErr: "invalid repository name"},
+		{in: "", wantErr: "empty"},
+	}
+	for _, tt := range tests {
+		got, err := ParseReference(tt.in)
+		if tt.wantErr != "" {
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("ParseReference(%q) error = %v, want %q", tt.in, err, tt.wantErr)
+			}
+			continue
+		}
+		if err != nil || got != tt.want {
+			t.Errorf("ParseReference(%q) = %+v, %v; want %+v", tt.in, got, err, tt.want)
+		}
+	}
+}

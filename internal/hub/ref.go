@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 )
 
 // These follow the distribution reference grammar. Hub data is trusted, but a
@@ -58,4 +59,43 @@ func isSchema1(mediaType string) bool {
 		return true
 	}
 	return false
+}
+
+// ImageRef is a parsed image reference such as "postgres:17-alpine" or
+// "docker.io/grafana/grafana:11.0.0@sha256:...".
+type ImageRef struct {
+	Repo Repo
+	// Tag is empty when the reference has none; docker reads that as
+	// "latest" unless a digest is given.
+	Tag string
+	// Digest is empty when the reference is not pinned.
+	Digest string
+}
+
+// ParseReference splits a Docker Hub image reference into repository, tag
+// and digest, validating each the way docker would.
+func ParseReference(s string) (ImageRef, error) {
+	s = strings.TrimSpace(s)
+	var ref ImageRef
+	name, digest, pinned := strings.Cut(s, "@")
+	if pinned {
+		if !digestRE.MatchString(digest) {
+			return ImageRef{}, fmt.Errorf("%q: invalid digest %q", s, digest)
+		}
+		ref.Digest = digest
+	}
+	// The tag follows the last path segment's colon; any earlier colon
+	// belongs to a registry host, which ParseRepo rejects.
+	if i := strings.LastIndexByte(name, ':'); i > strings.LastIndexByte(name, '/') {
+		name, ref.Tag = name[:i], name[i+1:]
+		if !tagRE.MatchString(ref.Tag) {
+			return ImageRef{}, fmt.Errorf("%q: invalid tag %q", s, ref.Tag)
+		}
+	}
+	repo, err := ParseRepo(name)
+	if err != nil {
+		return ImageRef{}, err
+	}
+	ref.Repo = repo
+	return ref, nil
 }

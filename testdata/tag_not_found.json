@@ -1,0 +1,8 @@
+{
+  "message": "httperror 404: tag 'no-such-tag-xyz' not found",
+  "errinfo": {
+    "namespace": "library",
+    "repository": "postgres",
+    "tag": "no-such-tag-xyz"
+  }
+}

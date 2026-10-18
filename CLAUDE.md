@@ -71,6 +71,8 @@ Verify each endpoint against the live API with `curl` before writing the client 
 - Search: `GET https://hub.docker.com/v2/search/repositories/?query=<q>&page_size=<n>`
 - Tags: `GET https://hub.docker.com/v2/namespaces/<ns>/repositories/<repo>/tags?page_size=<n>&ordering=last_updated`
   - `ordering` is inverted from what the names suggest: `last_updated` is newest first, `-last_updated` oldest first; `-name` is ascending. Verified live 2026-10-02.
+- Single tag: `GET .../repositories/<repo>/tags/<tag>` returns one tag in the same shape as a list item; 404 for a missing tag or repository. Verified live 2026-10-18.
+- Tags accept `name=<s>`: a case-sensitive substring filter applied server-side. Filtered lists reach tags past the anonymous paging cap (postgres's 9.6 line). Verified live 2026-10-18.
 - `page_size` is silently capped at 100 on both endpoints.
 - Anonymous paging is capped: tags stop after the first 1000, search after the first 200. Past that Hub returns 403 with a "pagination ... too large" message (and `next` still points past it).
 - Some legacy (schema v1) tags have `digest: null`. Indexes also list attestation manifests as `unknown/unknown` platforms; they are not runnable and must be hidden.

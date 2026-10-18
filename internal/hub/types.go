@@ -79,22 +79,52 @@ type searchResponse struct {
 }
 
 type tagsResponse struct {
-	Count   int    `json:"count"`
-	Next    string `json:"next"` // null on the last page
-	Results []struct {
-		Name          string    `json:"name"`
-		Digest        string    `json:"digest"` // null on some legacy tags
-		MediaType     string    `json:"media_type"`
-		LastUpdated   time.Time `json:"last_updated"`
-		TagLastPushed time.Time `json:"tag_last_pushed"`
-		Images        []struct {
-			OS           string `json:"os"`
-			Architecture string `json:"architecture"`
-			Variant      string `json:"variant"` // null when absent
-			Digest       string `json:"digest"`
-			Size         int64  `json:"size"`
-		} `json:"images"`
-	} `json:"results"`
+	Count   int       `json:"count"`
+	Next    string    `json:"next"` // null on the last page
+	Results []wireTag `json:"results"`
+}
+
+// wireTag is one tag as both the list and the single-tag endpoints return it.
+type wireTag struct {
+	Name          string    `json:"name"`
+	Digest        string    `json:"digest"` // null on some legacy tags
+	MediaType     string    `json:"media_type"`
+	LastUpdated   time.Time `json:"last_updated"`
+	TagLastPushed time.Time `json:"tag_last_pushed"`
+	Images        []struct {
+		OS           string `json:"os"`
+		Architecture string `json:"architecture"`
+		Variant      string `json:"variant"` // null when absent
+		Digest       string `json:"digest"`
+		Size         int64  `json:"size"`
+	} `json:"images"`
+}
+
+func (r wireTag) tag() Tag {
+	t := Tag{
+		Name:      r.Name,
+		Digest:    r.Digest,
+		MediaType: r.MediaType,
+		Pushed:    r.TagLastPushed,
+	}
+	if t.Pushed.IsZero() {
+		t.Pushed = r.LastUpdated
+	}
+	for _, img := range r.Images {
+		// Build attestations (provenance, SBOM) ride along in the index
+		// as unknown/unknown; they are not runnable platforms.
+		if img.OS == "unknown" && img.Architecture == "unknown" {
+			continue
+		}
+		t.Platforms = append(t.Platforms, Platform{
+			OS:      img.OS,
+			Arch:    img.Architecture,
+			Variant: img.Variant,
+			Digest:  img.Digest,
+			Size:    img.Size,
+		})
+	}
+	return t
 }
 
 // Matches reports whether p fits spec, which may be "arch", "os/arch",

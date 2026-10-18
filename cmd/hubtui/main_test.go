@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -23,6 +24,8 @@ type fakeRegistry struct {
 	errs     map[int]error // by tags page number
 	calls    []hub.TagsOptions
 	repos    []hub.Repo
+	// tagLookups records each name passed to Tag.
+	tagLookups []string
 }
 
 func (f *fakeRegistry) Search(_ context.Context, _ string, _ hub.PageOptions) (*hub.SearchPage, error) {
@@ -122,6 +125,19 @@ func tagNames(t *testing.T, stdout string) []string {
 		names = append(names, tg.Name)
 	}
 	return names
+}
+
+func (f *fakeRegistry) Tag(_ context.Context, repo hub.Repo, name string) (*hub.Tag, error) {
+	f.repos = append(f.repos, repo)
+	f.tagLookups = append(f.tagLookups, name)
+	for _, page := range f.tagPages {
+		for _, t := range page {
+			if t.Name == name {
+				return &t, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("getting %s:%s: %w", repo, name, hub.ErrNotFound)
 }
 
 func TestRunArgs(t *testing.T) {
