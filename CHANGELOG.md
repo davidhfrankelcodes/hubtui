@@ -7,6 +7,8 @@ minor version may change key bindings, flags or the JSON output.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-18
+
 ### Added
 
 - `hubtui resolve <image[:tag]>` prints a tag's reference pinned to its
@@ -69,7 +71,8 @@ First release.
 - Release archives for Linux and macOS on amd64 and arm64, and a multi-arch
   container image.
 
-[Unreleased]: https://github.com/davidhfrankelcodes/hubtui/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/davidhfrankelcodes/hubtui/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/davidhfrankelcodes/hubtui/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/davidhfrankelcodes/hubtui/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/davidhfrankelcodes/hubtui/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/davidhfrankelcodes/hubtui/releases/tag/v0.1.0
