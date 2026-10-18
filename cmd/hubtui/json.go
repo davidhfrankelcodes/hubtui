@@ -74,29 +74,38 @@ func (f tagFilter) keep(t hub.Tag) bool {
 func (a *app) tagsJSON(repo hub.Repo, tags []hub.Tag) int {
 	out := make([]tagJSON, 0, len(tags))
 	for _, t := range tags {
-		ref, err := hub.Reference(repo, t.Name)
+		tj, err := newTagJSON(repo, t)
 		if err != nil {
 			// Never print a list with a bad reference in it for scripts to use.
 			return a.fail(err)
 		}
-		tj := tagJSON{Name: t.Name, Reference: ref, MediaType: t.MediaType, Platforms: make([]platformJSON, 0, len(t.Platforms))}
-		if pinned, err := hub.PinnedReference(repo, t); err == nil {
-			tj.PinnedReference = &pinned
-		}
-		if t.Digest != "" {
-			tj.Digest = &t.Digest
-		}
-		if !t.Pushed.IsZero() {
-			tj.Pushed = &t.Pushed
-		}
-		for _, p := range t.Platforms {
-			tj.Platforms = append(tj.Platforms, platformJSON{
-				OS: p.OS, Architecture: p.Arch, Variant: p.Variant, Digest: p.Digest, Size: p.Size,
-			})
-		}
 		out = append(out, tj)
 	}
 	return a.writeJSON(out)
+}
+
+// newTagJSON is shared by tags and resolve, so a tag has one JSON shape.
+func newTagJSON(repo hub.Repo, t hub.Tag) (tagJSON, error) {
+	ref, err := hub.Reference(repo, t.Name)
+	if err != nil {
+		return tagJSON{}, err
+	}
+	tj := tagJSON{Name: t.Name, Reference: ref, MediaType: t.MediaType, Platforms: make([]platformJSON, 0, len(t.Platforms))}
+	if pinned, err := hub.PinnedReference(repo, t); err == nil {
+		tj.PinnedReference = &pinned
+	}
+	if t.Digest != "" {
+		tj.Digest = &t.Digest
+	}
+	if !t.Pushed.IsZero() {
+		tj.Pushed = &t.Pushed
+	}
+	for _, p := range t.Platforms {
+		tj.Platforms = append(tj.Platforms, platformJSON{
+			OS: p.OS, Architecture: p.Arch, Variant: p.Variant, Digest: p.Digest, Size: p.Size,
+		})
+	}
+	return tj, nil
 }
 
 // collectTags pages through tags newest first until it has limit matches

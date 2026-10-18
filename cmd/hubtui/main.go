@@ -28,6 +28,7 @@ const usage = `Usage:
   hubtui <image>                  browse an image's tags interactively
   hubtui search <query> [--table | --json]
   hubtui tags <image> [--table | --json] [--arch <arch>] [--limit <n>] [--stable]
+  hubtui resolve <image[:tag]> [--latest [--major]] [--arch <arch>] [--json]
   hubtui --version
 
 Set DOCKERHUB_USERNAME and DOCKERHUB_TOKEN (a personal access token) to
@@ -103,6 +104,8 @@ func (a *app) run(ctx context.Context, args []string) int {
 			return a.runSearch(ctx, args[1:])
 		case "tags":
 			return a.runTags(ctx, args[1:])
+		case "resolve":
+			return a.runResolve(ctx, args[1:])
 		}
 	}
 

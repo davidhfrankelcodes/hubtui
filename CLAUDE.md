@@ -119,9 +119,10 @@ Yanking shows a one-line confirmation in the status bar with exactly what was co
 ```
 hubtui search <query> [--table | --json]
 hubtui tags <image> [--table | --json] [--arch <arch>] [--limit <n>] [--stable]
+hubtui resolve <image[:tag]> [--latest [--major]] [--arch <arch>] [--json]
 ```
 
-Prints a table (the default, `--table`) or JSON (`--json`) to stdout and exits; passing both is a usage error. The JSON shape is a stable interface for scripts; the table is for people and may change. Tables use `internal/format`, the same helpers as the TUI, so both show sizes, times and digests identically. No TUI, no color, errors to stderr with a non-zero exit code. If stdout is not a TTY and no subcommand is given, print usage instead of starting the TUI.
+`resolve` prints one pinned reference (or one JSON object in the `tags --json` shape); it never prints an unpinned reference, failing instead. Version lines come from `hub.ParseTagName` and `hub.LatestInLine`, which are meant to be reused rather than reimplemented. `search` and `tags` print a table (the default, `--table`) or JSON (`--json`) to stdout and exit; passing both is a usage error. The JSON shape is a stable interface for scripts; the table is for people and may change. Tables use `internal/format`, the same helpers as the TUI, so both show sizes, times and digests identically. No TUI, no color, errors to stderr with a non-zero exit code. If stdout is not a TTY and no subcommand is given, print usage instead of starting the TUI.
 
 ## Conventions
 

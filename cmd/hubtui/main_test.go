@@ -464,7 +464,7 @@ func TestTagsEndToEnd(t *testing.T) {
 func TestUsageListsEveryForm(t *testing.T) {
 	_, _, stderr := runApp(t, &fakeRegistry{}, "-h")
 	block, _, _ := strings.Cut(stderr, "\n\n")
-	for _, form := range []string{"hubtui search <query> [--table | --json]", "hubtui tags <image> [--table | --json]", "hubtui <image>", "hubtui --version"} {
+	for _, form := range []string{"hubtui search <query> [--table | --json]", "hubtui tags <image> [--table | --json]", "hubtui resolve <image[:tag]>", "hubtui <image>", "hubtui --version"} {
 		if !strings.Contains(block, form) {
 			t.Errorf("usage block lacks %q:\n%s", form, block)
 		}

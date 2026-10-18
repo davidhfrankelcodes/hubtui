@@ -7,6 +7,14 @@ minor version may change key bindings, flags or the JSON output.
 
 ## [Unreleased]
 
+### Added
+
+- `hubtui resolve <image[:tag]>` prints a tag's reference pinned to its
+  multi-arch digest. `--latest` picks the newest tag of the same variant and
+  version precision within the major version (`postgres:17.4-alpine` to
+  `17.11-alpine`); `--major` allows a newer major. `--arch` and `--json` work
+  as on `tags`. Re-resolving a pinned reference notes when its tag has moved.
+
 ## [0.2.0] - 2026-10-12
 
 ### Changed

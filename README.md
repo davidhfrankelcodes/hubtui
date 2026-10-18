@@ -71,11 +71,12 @@ Copies go out as an OSC 52 escape sequence, which reaches your local clipboard e
 
 ## Scripting
 
-`search` and `tags` print results and exit without starting the UI. They print a table by default (`--table`) and JSON with `--json`. Errors go to stderr with a non-zero exit code.
+`search`, `tags` and `resolve` print results and exit without starting the UI. `search` and `tags` print a table by default (`--table`) and JSON with `--json`. Errors go to stderr with a non-zero exit code.
 
 ```sh
 hubtui search <query> [--table | --json]
 hubtui tags <image> [--table | --json] [--arch <arch>] [--limit <n>] [--stable]
+hubtui resolve <image[:tag]> [--latest [--major]] [--arch <arch>] [--json]
 ```
 
 ```
@@ -86,6 +87,17 @@ stable-perl          amd64,arm64/v8,arm/v7,386,ppc64le,+3   75.8 MB   4d ago   9
 ```
 
 The table is for reading and its layout may change; scripts should use `--json`.
+
+`resolve` prints one tag's reference pinned to its multi-arch digest, ready for a Dockerfile:
+
+```
+$ hubtui resolve postgres:17-alpine
+postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+$ hubtui resolve postgres:17.4-alpine --latest
+postgres:17.11-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+```
+
+`--latest` finds the newest tag in the same version line: the same variant (`alpine` stays `alpine`, never `alpine3.24`), the same number of version parts (`17.4` moves to `17.11`, not `17.11.1`), the same major version, and no betas or release candidates unless you started from one. `--major` lets the major version move too (`17-alpine` to `18-alpine`). A tag without a version, such as `latest`, cannot be compared. Given a pinned reference whose tag has since moved, `resolve` prints the new pin and notes the change on stderr.
 
 Tags come newest first. `--limit` defaults to 100; `0` means everything Docker Hub will return. `--arch` accepts `arm64`, `linux/arm64`, `arm/v7` and similar, and keeps the tags that have that platform. `--stable` leaves out the same tags as `u`.
 
