@@ -7,6 +7,18 @@ minor version may change key bindings, flags or the JSON output.
 
 ## [Unreleased]
 
+### Added
+
+- `hubtui check [file ...]` reports which `FROM` images in a Dockerfile are
+  outdated (a newer tag in the same version line, as `resolve --latest`
+  finds), moved, unpinned or pinned to a single platform's image, with the
+  pinned reference to use instead. It exits 1 when anything needs updating,
+  so it can run in CI. `--write` updates the files in place, `--major`
+  allows newer major versions, `--minor` keeps the minor version and
+  `--json` prints each line's result.
+- `hubtui resolve --latest --minor` keeps the minor version too:
+  `python:3.12.1` resolves to the newest `3.12.x`, never `3.13.0`.
+
 ## [0.3.0] - 2026-10-18
 
 ### Added

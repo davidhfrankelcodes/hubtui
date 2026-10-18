@@ -28,7 +28,8 @@ const usage = `Usage:
   hubtui <image>                  browse an image's tags interactively
   hubtui search <query> [--table | --json]
   hubtui tags <image> [--table | --json] [--arch <arch>] [--limit <n>] [--stable]
-  hubtui resolve <image[:tag]> [--latest [--major]] [--arch <arch>] [--json]
+  hubtui resolve <image[:tag]> [--latest [--major | --minor]] [--arch <arch>] [--json]
+  hubtui check [file ...] [--major | --minor] [--write] [--table | --json]
   hubtui --version
 
 Set DOCKERHUB_USERNAME and DOCKERHUB_TOKEN (a personal access token) to
@@ -45,6 +46,7 @@ const (
 // app holds what commands need, so tests can swap the registry, streams,
 // clock and terminal.
 type app struct {
+	stdin          io.Reader
 	stdout, stderr io.Writer
 	registry       hub.Registry
 	// now dates the PUSHED column of the tags table.
@@ -79,6 +81,7 @@ func mainCode() int {
 		return exitError
 	}
 	a := &app{
+		stdin:       os.Stdin,
 		stdout:      os.Stdout,
 		stderr:      os.Stderr,
 		registry:    client,
@@ -106,6 +109,8 @@ func (a *app) run(ctx context.Context, args []string) int {
 			return a.runTags(ctx, args[1:])
 		case "resolve":
 			return a.runResolve(ctx, args[1:])
+		case "check":
+			return a.runCheck(ctx, args[1:])
 		}
 	}
 

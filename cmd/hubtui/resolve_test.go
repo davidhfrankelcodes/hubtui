@@ -22,6 +22,10 @@ func resolveFixture() *fakeRegistry {
 	// Newest 17.x Alpine has no arm64 image.
 	tags[3].Platforms = both[:1]
 	tags = append(tags, hub.Tag{Name: "9.6", MediaType: "application/vnd.docker.distribution.manifest.v1+prettyjws"})
+	// A three-part line for --minor: 17.5.0 is newer but another minor.
+	for i, n := range []string{"17.5.0-alpine", "17.4.3-alpine", "17.4.1-alpine"} {
+		tags = append(tags, hub.Tag{Name: n, Digest: digestFor(20 + i), MediaType: "application/vnd.oci.image.index.v1+json", Platforms: both})
+	}
 	return &fakeRegistry{tagPages: [][]hub.Tag{tags}}
 }
 
@@ -40,6 +44,8 @@ func TestResolve(t *testing.T) {
 		{name: "latest in line", args: []string{"postgres:17.4-alpine", "--latest"}, want: "postgres:17.11-alpine@" + digestFor(3)},
 		{name: "latest skips a missing platform", args: []string{"--latest", "--arch", "arm64", "postgres:17.4-alpine"}, want: "postgres:17.10-alpine@" + digestFor(4)},
 		{name: "latest across majors", args: []string{"postgres:17-alpine", "--latest", "--major"}, want: "postgres:18-alpine@" + digestFor(2)},
+		{name: "latest within the major", args: []string{"postgres:17.4.1-alpine", "--latest"}, want: "postgres:17.5.0-alpine@" + digestFor(20)},
+		{name: "latest within the minor", args: []string{"postgres:17.4.1-alpine", "--latest", "--minor"}, want: "postgres:17.4.3-alpine@" + digestFor(21)},
 		{
 			name: "moved digest is noted, new pin printed",
 			args: []string{"postgres:17-alpine@" + digestFor(99)},
@@ -91,7 +97,9 @@ func TestResolveErrors(t *testing.T) {
 	}{
 		{name: "no image", args: nil, wantCode: 2, wantStderr: "exactly one image"},
 		{name: "two images", args: []string{"postgres", "redis"}, wantCode: 2, wantStderr: "exactly one image"},
-		{name: "major without latest", args: []string{"postgres:17", "--major"}, wantCode: 2, wantStderr: "--major only applies with --latest"},
+		{name: "major without latest", args: []string{"postgres:17", "--major"}, wantCode: 2, wantStderr: "--major and --minor only apply with --latest"},
+		{name: "minor without latest", args: []string{"postgres:17", "--minor"}, wantCode: 2, wantStderr: "only apply with --latest"},
+		{name: "major and minor", args: []string{"postgres:17", "--latest", "--major", "--minor"}, wantCode: 2, wantStderr: "cannot be used together"},
 		{name: "digest without tag", args: []string{"postgres@" + digestFor(1)}, wantCode: 2, wantStderr: "give a tag along with the digest"},
 		{name: "other registry", args: []string{"ghcr.io/o/app:1"}, wantCode: 2, wantStderr: "only Docker Hub"},
 		{name: "bad tag", args: []string{"postgres:-1"}, wantCode: 2, wantStderr: "invalid tag"},

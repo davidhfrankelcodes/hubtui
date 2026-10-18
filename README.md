@@ -71,12 +71,13 @@ Copies go out as an OSC 52 escape sequence, which reaches your local clipboard e
 
 ## Scripting
 
-`search`, `tags` and `resolve` print results and exit without starting the UI. `search` and `tags` print a table by default (`--table`) and JSON with `--json`. Errors go to stderr with a non-zero exit code.
+`search`, `tags`, `resolve` and `check` print results and exit without starting the UI. `search`, `tags` and `check` print a table by default (`--table`) and JSON with `--json`. Errors go to stderr with a non-zero exit code.
 
 ```sh
 hubtui search <query> [--table | --json]
 hubtui tags <image> [--table | --json] [--arch <arch>] [--limit <n>] [--stable]
-hubtui resolve <image[:tag]> [--latest [--major]] [--arch <arch>] [--json]
+hubtui resolve <image[:tag]> [--latest [--major | --minor]] [--arch <arch>] [--json]
+hubtui check [file ...] [--major | --minor] [--write] [--table | --json]
 ```
 
 ```
@@ -97,7 +98,18 @@ $ hubtui resolve postgres:17.4-alpine --latest
 postgres:17.11-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
 ```
 
-`--latest` finds the newest tag in the same version line: the same variant (`alpine` stays `alpine`, never `alpine3.24`), the same number of version parts (`17.4` moves to `17.11`, not `17.11.1`), the same major version, and no betas or release candidates unless you started from one, and then only later ones of the same version (`3.14.0rc1` moves to `3.14.0rc2` or `3.14.2`, never `3.15.0a1`). Tags that cannot be pinned, such as legacy ones without a digest, are skipped. `--major` lets the major version move too (`17-alpine` to `18-alpine`). A tag without a version, such as `latest`, cannot be compared. Given a pinned reference whose tag has since moved, `resolve` prints the new pin and notes the change on stderr.
+`--latest` finds the newest tag in the same version line: the same variant (`alpine` stays `alpine`, never `alpine3.24`), the same number of version parts (`17.4` moves to `17.11`, not `17.11.1`), the same major version, and no betas or release candidates unless you started from one, and then only later ones of the same version (`3.14.0rc1` moves to `3.14.0rc2` or `3.14.2`, never `3.15.0a1`). Tags that cannot be pinned, such as legacy ones without a digest, are skipped. `--major` lets the major version move too (`17-alpine` to `18-alpine`); `--minor` holds the minor version as well, for images whose minor releases are the real boundary (`python:3.12.1` moves to the newest `3.12.x`, never `3.13.0`, and `ubuntu:24.04` stays on 24.04). The fixed parts must match as written, so `24.04` and `24.4` are separate lines. A tag without a version, such as `latest`, cannot be compared. Given a pinned reference whose tag has since moved, `resolve` prints the new pin and notes the change on stderr.
+
+`check` reads the `FROM` lines of a Dockerfile (`./Dockerfile` unless you name files; `-` reads stdin) and says which images need a new pin:
+
+```
+$ hubtui check
+LOCATION        IMAGE                                       STATUS     UPDATE
+Dockerfile:8    golang:1.27.1-alpine@sha256:8a5910f31396…   outdated   golang:1.27.2-alpine@sha256:f92b6ef800e4…
+Dockerfile:22   scratch                                     skipped    scratch is not an image
+```
+
+An image is `outdated` when a newer tag is in its version line (the same rules as `resolve --latest`, and `--major` and `--minor` work the same way), `moved` when its tag now points at a different image than the pinned digest, `unpinned` without a digest, and `single-arch` when the digest is one platform's image rather than the multi-arch index, which breaks the build on other machines. A literal `FROM --platform=linux/arm64` only considers tags with that platform. `scratch`, earlier build stages, other registries and images built from build args are skipped. `--write` puts the suggested references into the files, changing nothing else on the line. `check` exits 1 when anything needs updating or could not be checked (after `--write`, only when something is left), so it can run in CI; `--json` gives each line's status and full suggestion for scripts.
 
 Tags come newest first. `--limit` defaults to 100; `0` means everything Docker Hub will return. `--arch` accepts `arm64`, `linux/arm64`, `arm/v7` and similar, and keeps the tags that have that platform. `--stable` leaves out the same tags as `u`.
 

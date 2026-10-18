@@ -139,15 +139,18 @@ func (t TagName) Compare(o TagName) int {
 
 // SameLine reports whether o could replace t in a version line: same
 // variant, same precision (17.4 moves to 17.11, not 17.11.1, and 27 not to
-// the build 27_35), the same major version unless crossMajor, and a release
-// unless o is a later prerelease of t's own version (18beta3 to 18rc1, but
-// 3.14.0rc1 never to 3.15.0a1).
-func (t TagName) SameLine(o TagName, crossMajor bool) bool {
-	return t.HasVersion() && o.HasVersion() &&
-		o.Variant == t.Variant &&
-		len(o.Version) == len(t.Version) &&
+// the build 27_35), the same first fixed version parts as written (1 keeps
+// the major, 2 the minor, 0 allows any; 24.04 and 24.4 are different
+// schemes, not one line), and a release unless o is a later prerelease of
+// t's own version (18beta3 to 18rc1, but 3.14.0rc1 never to 3.15.0a1).
+func (t TagName) SameLine(o TagName, fixed int) bool {
+	if !t.HasVersion() || !o.HasVersion() || len(o.Version) != len(t.Version) {
+		return false
+	}
+	n := min(fixed, len(t.Version))
+	return o.Variant == t.Variant &&
 		(o.Build == 0) == (t.Build == 0) &&
-		(crossMajor || o.Version[0] == t.Version[0]) &&
+		writtenVersion(o.Name, n) == writtenVersion(t.Name, n) &&
 		(o.Pre == "" || t.Pre != "" && slices.Equal(o.Version, t.Version) && o.Build == t.Build)
 }
 

@@ -52,8 +52,13 @@ func testNow() time.Time { return time.Date(2026, 10, 2, 12, 0, 0, 0, time.UTC) 
 
 func runApp(t *testing.T, reg hub.Registry, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
+	return runAppWithStdin(t, reg, "", args...)
+}
+
+func runAppWithStdin(t *testing.T, reg hub.Registry, stdin string, args ...string) (code int, stdout, stderr string) {
+	t.Helper()
 	var out, errOut bytes.Buffer
-	a := &app{stdout: &out, stderr: &errOut, registry: reg, now: testNow, openTUI: func(context.Context, *hub.Repo) error {
+	a := &app{stdin: strings.NewReader(stdin), stdout: &out, stderr: &errOut, registry: reg, now: testNow, openTUI: func(context.Context, *hub.Repo) error {
 		t.Error("TUI started unexpectedly")
 		return nil
 	}}
@@ -464,7 +469,7 @@ func TestTagsEndToEnd(t *testing.T) {
 func TestUsageListsEveryForm(t *testing.T) {
 	_, _, stderr := runApp(t, &fakeRegistry{}, "-h")
 	block, _, _ := strings.Cut(stderr, "\n\n")
-	for _, form := range []string{"hubtui search <query> [--table | --json]", "hubtui tags <image> [--table | --json]", "hubtui resolve <image[:tag]>", "hubtui <image>", "hubtui --version"} {
+	for _, form := range []string{"hubtui search <query> [--table | --json]", "hubtui tags <image> [--table | --json]", "hubtui resolve <image[:tag]>", "hubtui check [file ...] [--major | --minor]", "hubtui <image>", "hubtui --version"} {
 		if !strings.Contains(block, form) {
 			t.Errorf("usage block lacks %q:\n%s", form, block)
 		}

@@ -62,7 +62,7 @@ func postgresTags() []Tag {
 		"19rc1-alpine", "19rc1", "18.1-alpine", "18.1", "18-alpine", "18",
 		"17.11-alpine3.24", "17.11-alpine", "17.11", "17-alpine", "17",
 		"17.10-alpine", "17.9-alpine", "16.12-alpine", "18beta3-alpine", "18rc1-alpine",
-		"17.4-alpine", "latest", "alpine",
+		"17.4-alpine", "latest", "alpine", "17.5.0-alpine", "17.4.3-alpine", "17.4.1-alpine",
 	} {
 		tags = append(tags, Tag{Name: n, Digest: "sha256:" + strings.Repeat("a", 64), Platforms: both})
 	}
@@ -90,6 +90,9 @@ func TestLatestInLine(t *testing.T) {
 		{name: "cross major", from: "17-alpine", opts: LineOptions{CrossMajor: true}, want: "18-alpine", wantFilter: "alpine"},
 		{name: "cross major never picks a prerelease", from: "17.4-alpine", opts: LineOptions{CrossMajor: true}, want: "18.1-alpine", wantFilter: "alpine"},
 		{name: "cross major without variant", from: "17.4", opts: LineOptions{CrossMajor: true}, want: "18.1", wantFilter: ""},
+		{name: "minor holds the minor", from: "17.4.1-alpine", opts: LineOptions{SameMinor: true}, want: "17.4.3-alpine", wantFilter: "17.4."},
+		{name: "minor wins over major", from: "17.4.1-alpine", opts: LineOptions{SameMinor: true, CrossMajor: true}, want: "17.4.3-alpine", wantFilter: "17.4."},
+		{name: "minor of a two-part tag is itself", from: "17.4-alpine", opts: LineOptions{SameMinor: true}, want: "17.4-alpine", wantFilter: "-"},
 		{name: "prerelease moves to its release", from: "18beta3-alpine", want: "18-alpine", wantFilter: "18"},
 		{name: "no version", from: "latest", wantErr: ErrNoVersion},
 		{name: "nothing has the platform", from: "17.4-alpine", opts: LineOptions{Platform: "s390x"}, wantErr: ErrNotFound},
@@ -129,7 +132,7 @@ func TestLatestInLinePaging(t *testing.T) {
 	// Every page is read: the newest version can be pushed after others.
 	reg := &lineRegistry{tags: postgresTags(), pageSize: 2}
 	res, err := LatestInLine(ctx, reg, postgres, "17.4", LineOptions{CrossMajor: true})
-	if err != nil || res.Tag.Name != "18.1" || len(reg.listCalls) != 10 {
+	if err != nil || res.Tag.Name != "18.1" || len(reg.listCalls) != 11 {
 		t.Errorf("got %s, %v after %d pages", res.Tag.Name, err, len(reg.listCalls))
 	}
 
@@ -157,7 +160,7 @@ func (f *failingTags) Tags(context.Context, Repo, TagsOptions) (*TagPage, error)
 
 // The server-side filter must be part of every tag SameLine would accept,
 // or Hub drops a candidate before it is ever compared. Checked over every
-// recorded tag name, within and across majors.
+// recorded tag name, for every number of fixed parts.
 func TestLineFilterKeepsEveryCandidate(t *testing.T) {
 	f, err := os.Open(filepath.Join("..", "..", "testdata", "tag_names.txt"))
 	if err != nil {
@@ -186,13 +189,13 @@ func TestLineFilterKeepsEveryCandidate(t *testing.T) {
 	checked := 0
 	for _, names := range buckets {
 		for _, base := range names {
-			for _, cross := range []bool{false, true} {
-				filter := lineFilter(base, cross)
+			for fixed := range 3 {
+				filter := lineFilter(base, fixed)
 				for _, c := range names {
-					if base.SameLine(c, cross) {
+					if base.SameLine(c, fixed) {
 						checked++
 						if !strings.Contains(c.Name, filter) {
-							t.Errorf("line of %s (crossMajor %v): filter %q drops %s", base.Name, cross, filter, c.Name)
+							t.Errorf("line of %s (fixed %d): filter %q drops %s", base.Name, fixed, filter, c.Name)
 						}
 					}
 				}

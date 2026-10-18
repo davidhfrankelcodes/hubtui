@@ -35,7 +35,7 @@ func ParseRepo(s string) (Repo, error) {
 		case isDockerHubHost(host):
 			parts = parts[1:]
 		case strings.ContainsAny(host, ".:") || host == "localhost":
-			return Repo{}, fmt.Errorf("%q: only Docker Hub repositories are supported", s)
+			return Repo{}, fmt.Errorf("%q: only Docker Hub repositories are supported: %w", s, ErrNotDockerHub)
 		}
 	}
 

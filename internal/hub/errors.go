@@ -15,6 +15,8 @@ var (
 	// ErrPageLimit means Docker Hub refused to page further. Anonymous
 	// requests stop after 1000 tags or 200 search results.
 	ErrPageLimit = errors.New("docker hub pagination limit reached")
+	// ErrNotDockerHub means a reference names another registry.
+	ErrNotDockerHub = errors.New("not a docker hub repository")
 	// ErrAuth means Docker Hub rejected the configured credentials.
 	ErrAuth = errors.New("docker hub login failed")
 )

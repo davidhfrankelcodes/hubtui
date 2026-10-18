@@ -45,14 +45,15 @@ Run `make lint test` before declaring any task done. CI calls these same make ta
 ## Layout
 
 ```
-cmd/hubtui/        main.go: flag parsing, wiring only
-internal/hub/      Docker Hub API client and types. No TUI imports.
-internal/tui/      Bubble Tea models, one file per screen
-internal/format/   Display formatting shared by the TUI and the CLI tables
-internal/clip/     Clipboard (OSC 52 first, native fallback)
-internal/browser/  Opening Docker Hub pages in the user's browser
-internal/config/   Env and flag resolution
-testdata/          Recorded API responses used by tests
+cmd/hubtui/          main.go: flag parsing, wiring only
+internal/hub/        Docker Hub API client and types. No TUI imports.
+internal/tui/        Bubble Tea models, one file per screen
+internal/format/     Display formatting shared by the TUI and the CLI tables
+internal/dockerfile/ FROM lines of Dockerfiles: parsing and in-place rewriting. No hub imports.
+internal/clip/       Clipboard (OSC 52 first, native fallback)
+internal/browser/    Opening Docker Hub pages in the user's browser
+internal/config/     Env and flag resolution
+testdata/            Recorded API responses used by tests
 ```
 
 ## Architecture rules
@@ -119,10 +120,11 @@ Yanking shows a one-line confirmation in the status bar with exactly what was co
 ```
 hubtui search <query> [--table | --json]
 hubtui tags <image> [--table | --json] [--arch <arch>] [--limit <n>] [--stable]
-hubtui resolve <image[:tag]> [--latest [--major]] [--arch <arch>] [--json]
+hubtui resolve <image[:tag]> [--latest [--major | --minor]] [--arch <arch>] [--json]
+hubtui check [file ...] [--major | --minor] [--write] [--table | --json]
 ```
 
-`resolve` prints one pinned reference (or one JSON object in the `tags --json` shape); it never prints an unpinned reference, failing instead. Version lines come from `hub.ParseTagName` and `hub.LatestInLine`, which are meant to be reused rather than reimplemented. `search` and `tags` print a table (the default, `--table`) or JSON (`--json`) to stdout and exit; passing both is a usage error. The JSON shape is a stable interface for scripts; the table is for people and may change. Tables use `internal/format`, the same helpers as the TUI, so both show sizes, times and digests identically. No TUI, no color, errors to stderr with a non-zero exit code. If stdout is not a TTY and no subcommand is given, print usage instead of starting the TUI.
+`resolve` prints one pinned reference (or one JSON object in the `tags --json` shape); it never prints an unpinned reference, failing instead. Version lines come from `hub.ParseTagName` and `hub.LatestInLine`, which are meant to be reused rather than reimplemented. `check` reports each `FROM` line's status from `hub.CheckReference` and exits 1 when anything needs updating, so it can gate CI; `--write` must change only the image text, byte for byte, which `internal/dockerfile` tests (including a fuzz test of its offsets) guard. `search` and `tags` print a table (the default, `--table`) or JSON (`--json`) to stdout and exit; passing both is a usage error. The JSON shape is a stable interface for scripts; the table is for people and may change. Tables use `internal/format`, the same helpers as the TUI, so both show sizes, times and digests identically. No TUI, no color, errors to stderr with a non-zero exit code. If stdout is not a TTY and no subcommand is given, print usage instead of starting the TUI.
 
 ## Conventions
 

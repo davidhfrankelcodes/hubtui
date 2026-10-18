@@ -96,34 +96,45 @@ func TestTagNameCompare(t *testing.T) {
 }
 
 func TestTagNameSameLine(t *testing.T) {
+	const anyMajor, sameMajor, sameMinor = 0, 1, 2
 	tests := []struct {
-		from, to   string
-		crossMajor bool
-		want       bool
+		from, to string
+		fixed    int
+		want     bool
 	}{
-		{"17.4-alpine", "17.11-alpine", false, true},
-		{"17.4-alpine", "17.4-alpine", false, true},
-		{"17.4-alpine", "17.11-alpine3.24", false, false}, // variant differs
-		{"17.4-alpine", "17.11.1-alpine", false, false},   // precision differs
-		{"17.4-alpine", "18.1-alpine", false, false},      // major differs
-		{"17.4-alpine", "18.1-alpine", true, true},
-		{"17-alpine", "18-alpine", true, true},
-		{"17.4-alpine", "17.5rc1-alpine", false, false}, // a release never moves to a prerelease
-		{"18beta3-alpine", "18rc1-alpine", false, true}, // a prerelease may move on
-		{"18beta3-alpine", "18-alpine", false, true},
-		{"3.14.0rc1", "3.14.0rc2", false, true},
-		{"3.14.0rc1", "3.14.2", false, true},
-		{"3.14.0rc1", "3.15.0a1", false, false},        // not a prerelease of another version
-		{"3.14.0rc1", "4.0.0a1", true, false},          // nor across majors
-		{"27-jdk", "27_35-jdk", false, false},          // a build is more precise
-		{"21.0.4_7-jdk", "21.0.5_11-jdk", false, true}, // builds move to builds
-		{"21.0.4_7-jdk", "21.0.5-jdk", false, false},
-		{"latest", "latest", false, false},
-		{"17.4", "latest", true, false},
+		{"17.4-alpine", "17.11-alpine", sameMajor, true},
+		{"17.4-alpine", "17.4-alpine", sameMajor, true},
+		{"17.4-alpine", "17.11-alpine3.24", sameMajor, false}, // variant differs
+		{"17.4-alpine", "17.11.1-alpine", sameMajor, false},   // precision differs
+		{"17.4-alpine", "18.1-alpine", sameMajor, false},      // major differs
+		{"17.4-alpine", "18.1-alpine", anyMajor, true},
+		{"17-alpine", "18-alpine", anyMajor, true},
+		{"17.4-alpine", "17.5rc1-alpine", sameMajor, false}, // a release never moves to a prerelease
+		{"18beta3-alpine", "18rc1-alpine", sameMajor, true}, // a prerelease may move on
+		{"18beta3-alpine", "18-alpine", sameMajor, true},
+		{"3.14.0rc1", "3.14.0rc2", sameMajor, true},
+		{"3.14.0rc1", "3.14.2", sameMajor, true},
+		{"3.14.0rc1", "3.15.0a1", sameMajor, false}, // not a prerelease of another version
+		{"3.14.0rc1", "4.0.0a1", anyMajor, false},   // nor across majors
+		{"27-jdk", "27_35-jdk", sameMajor, false},   // a build is more precise
+		{"21.0.4_7-jdk", "21.0.5_11-jdk", sameMajor, true},
+		{"21.0.4_7-jdk", "21.0.5-jdk", sameMajor, false},
+		{"latest", "latest", sameMajor, false},
+		{"17.4", "latest", anyMajor, false},
+
+		// --minor holds the first two parts.
+		{"3.12.1-slim", "3.12.9-slim", sameMinor, true},
+		{"3.12.1-slim", "3.13.0-slim", sameMinor, false},
+		{"24.04", "24.10", sameMinor, false},
+		{"24.04", "24.4", sameMinor, false}, // the same number, another scheme
+		{"v3.12.1", "3.12.4", sameMinor, true},
+		{"17-alpine", "17-alpine", sameMinor, true},
+		{"17-alpine", "18-alpine", sameMinor, false},
+		{"3.12.0rc1", "3.12.0", sameMinor, true},
 	}
 	for _, tt := range tests {
-		if got := ParseTagName(tt.from).SameLine(ParseTagName(tt.to), tt.crossMajor); got != tt.want {
-			t.Errorf("SameLine(%s → %s, crossMajor=%v) = %v, want %v", tt.from, tt.to, tt.crossMajor, got, tt.want)
+		if got := ParseTagName(tt.from).SameLine(ParseTagName(tt.to), tt.fixed); got != tt.want {
+			t.Errorf("SameLine(%s → %s, fixed=%d) = %v, want %v", tt.from, tt.to, tt.fixed, got, tt.want)
 		}
 	}
 }

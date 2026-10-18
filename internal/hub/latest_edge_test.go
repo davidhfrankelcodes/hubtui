@@ -95,20 +95,21 @@ func TestLatestInLineCorpus(t *testing.T) {
 		if !from.HasVersion() {
 			continue
 		}
-		for _, cross := range []bool{false, true} {
+		for _, opts := range []LineOptions{{}, {CrossMajor: true}, {SameMinor: true}} {
+			fixed := opts.fixed()
 			var want *TagName
 			for j := range parsed {
-				if from.SameLine(parsed[j], cross) && (want == nil || parsed[j].Compare(*want) > 0) {
+				if from.SameLine(parsed[j], fixed) && (want == nil || parsed[j].Compare(*want) > 0) {
 					want = &parsed[j]
 				}
 			}
-			res, err := LatestInLine(ctx, reg, Repo{"library", "x"}, from.Name, LineOptions{CrossMajor: cross})
+			res, err := LatestInLine(ctx, reg, Repo{"library", "x"}, from.Name, opts)
 			if err != nil {
-				t.Fatalf("%s (cross %v): %v", from.Name, cross, err)
+				t.Fatalf("%s (%+v): %v", from.Name, opts, err)
 			}
 			got := ParseTagName(res.Tag.Name)
-			if !from.SameLine(got, cross) || got.Compare(*want) != 0 || got.Compare(from) < 0 {
-				t.Errorf("%s (cross %v): got %s, want %s", from.Name, cross, got.Name, want.Name)
+			if !from.SameLine(got, fixed) || got.Compare(*want) != 0 || got.Compare(from) < 0 {
+				t.Errorf("%s (%+v): got %s, want %s", from.Name, opts, got.Name, want.Name)
 			}
 			checked++
 		}
