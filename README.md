@@ -155,7 +155,7 @@ make image     # multi-arch container image
 make demo      # re-record docs/demo.gif from docs/demo.tape (needs Docker)
 ```
 
-Tests never touch the network: the API client is tested against recorded responses in `testdata/`. CI (`Jenkinsfile`) runs the same make targets. See `CLAUDE.md` for the architecture and the conventions the code follows.
+Tests never touch the network: the API client is tested against recorded responses in `testdata/`. CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the same make targets. See `CLAUDE.md` for the architecture and the conventions the code follows.
 
 ## Releasing
 
@@ -163,6 +163,8 @@ Versions follow [Semantic Versioning](https://semver.org/); changes are recorded
 
 1. Move the notes under `## [Unreleased]` in `CHANGELOG.md` to a new `## [X.Y.Z] - YYYY-MM-DD` section, update the links at the bottom, and commit on `main`.
 2. Run `make tag TAG=vX.Y.Z`. It checks the tree is clean, the changelog entry exists, and lint and tests pass, then creates an annotated tag carrying that entry. It does not push.
-3. Run `git push origin vX.Y.Z`. CI builds the release archives, publishes them as a GitHub release with the changelog entry as its notes (`make gh-release`), and publishes the image as `vX.Y.Z` and `latest`.
+3. Run `git push origin vX.Y.Z`. GitHub Actions runs lint and tests again, publishes the image as `vX.Y.Z` and `latest` (`make image-push`), then builds the release archives and publishes them as a GitHub release with the changelog entry as its notes (`make gh-release`).
+
+Publishing the image needs two repository secrets: `DOCKERHUB_PUSH_USERNAME` and `DOCKERHUB_PUSH_TOKEN`, a Docker Hub access token with Read & Write access. The GitHub release uses the workflow's own token.
 
 Prereleases (`vX.Y.Z-rc.N`, `-beta.N`, `-alpha.N`) go through the same steps but never move `latest` or become the latest GitHub release. `make release` and `make image-push` refuse any other version, so an untagged or dirty build cannot be published.

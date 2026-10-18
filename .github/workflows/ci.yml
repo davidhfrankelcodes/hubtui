@@ -1,0 +1,79 @@
+# CI runs make targets and nothing else (see CLAUDE.md), so a green build
+# here means the same thing as `make lint test` on a laptop. Pushing a
+# release tag (vX.Y.Z) also publishes the image and the GitHub release.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # A newer push supersedes a branch build; a release must run to the end.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  # Fail instead of silently downloading a different Go.
+  GOTOOLCHAIN: local
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Pins the same Go (1.27.1) and golangci-lint (2.14.0) as mise.toml; it
+    # also has make, git and gcc, which `-race` needs.
+    container: golangci/golangci-lint:v2.14.0@sha256:ad862ba6b3798cbe0fd9fd7408d498fd74fbd2623a92406b2fd3898faf0bf98f
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # git describe needs the tags to stamp the version.
+          fetch-depth: 0
+      # The container runs as root over a checkout git sees as someone
+      # else's, and git describe refuses it.
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: make lint
+      - run: make test
+      - run: make build
+
+  image:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The build stage cross-compiles and the final stage runs nothing, so
+      # a multi-arch build needs buildx but no emulation.
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      # Not DOCKERHUB_USERNAME/DOCKERHUB_TOKEN: hubtui reads those for its
+      # own API sign-in, and a push token should never be mistaken for one.
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_PUSH_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PUSH_TOKEN }}
+      - run: make image-push VERSION="$GITHUB_REF_NAME"
+
+  github-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    # After the image, because the release notes tell people to run it.
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    container: golangci/golangci-lint:v2.14.0@sha256:ad862ba6b3798cbe0fd9fd7408d498fd74fbd2623a92406b2fd3898faf0bf98f
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: make release VERSION="$GITHUB_REF_NAME"
+      - run: make gh-release VERSION="$GITHUB_REF_NAME"
+        env:
+          # The workflow's own token; no personal token to create or rotate.
+          GH_TOKEN: ${{ github.token }}

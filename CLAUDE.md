@@ -155,5 +155,5 @@ Work through these in order. Stop after each one, run `make lint test`, and summ
 6. Search screen and navigation between screens.
 7. Tag detail screen, arch filter, help overlay.
 8. Auth via environment variables and 429 handling.
-9. Packaging: release binaries for linux/darwin on amd64/arm64, a multi-arch container image, and a Jenkinsfile that runs the make targets.
+9. Packaging: release binaries for linux/darwin on amd64/arm64, a multi-arch container image, and a GitHub Actions workflow that runs the make targets.
 10. README with a demo recording.
