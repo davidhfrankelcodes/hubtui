@@ -10,7 +10,7 @@ Finding the right tag on hub.docker.com is slow: tags are paginated, filtering i
 
 ## Install
 
-From source (Go 1.27.1 or later):
+From source (Go 1.27.2 or later):
 
 ```sh
 go install github.com/davidhfrankelcodes/hubtui/cmd/hubtui@latest
