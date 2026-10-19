@@ -7,6 +7,8 @@ minor version may change key bindings, flags or the JSON output.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-18
+
 ### Added
 
 - `hubtui check [file ...]` reports which `FROM` images in a Dockerfile are
@@ -18,6 +20,11 @@ minor version may change key bindings, flags or the JSON output.
   `--json` prints each line's result.
 - `hubtui resolve --latest --minor` keeps the minor version too:
   `python:3.12.1` resolves to the newest `3.12.x`, never `3.13.0`.
+
+### Changed
+
+- Building from source needs Go 1.27.2 or later; release binaries and the
+  container image are built with it.
 
 ## [0.3.0] - 2026-10-18
 
@@ -83,7 +90,8 @@ First release.
 - Release archives for Linux and macOS on amd64 and arm64, and a multi-arch
   container image.
 
-[Unreleased]: https://github.com/davidhfrankelcodes/hubtui/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/davidhfrankelcodes/hubtui/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/davidhfrankelcodes/hubtui/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/davidhfrankelcodes/hubtui/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/davidhfrankelcodes/hubtui/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/davidhfrankelcodes/hubtui/compare/v0.1.0...v0.1.1
